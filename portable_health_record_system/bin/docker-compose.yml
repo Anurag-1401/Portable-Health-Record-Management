@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: phr-postgres
+    environment:
+      POSTGRES_DB: phr
+      POSTGRES_USER: phr
+      POSTGRES_PASSWORD: phr
+    ports:
+      - "5432:5432"
+    volumes:
+      - phr-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phr -d phr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  phr-postgres-data:

@@ -1,0 +1,19 @@
+package com.portable_health_record_system.common;
+
+public enum AuditAction {
+    OTP_REQUESTED,
+    OTP_VERIFIED,
+    LOGIN_FAILED,
+    LOGOUT,
+    RECORD_READ,
+    RECORD_CREATED,
+    RECORD_UPDATED,
+    CONSENT_REQUESTED,
+    CONSENT_APPROVED,
+    CONSENT_DENIED,
+    QR_VALIDATED,
+    EMERGENCY_CRITICAL_INFO_READ,
+    SYNC_RECEIVED,
+    SYNC_CONFLICT,
+    HASH_CHAIN_VERIFIED
+}

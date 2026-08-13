@@ -1,0 +1,33 @@
+### Request OTP - demo patient
+POST http://localhost:8000/api/auth/otp/request
+Content-Type: application/json
+
+{"phoneNumber":"+919999999001"}
+
+### Verify OTP - replace 123456 with devOtp
+POST http://localhost:8000/api/auth/otp/verify
+Content-Type: application/json
+
+{"phoneNumber":"+919999999001","otp":"123456"}
+
+### Emergency lookup - replace TOKEN
+GET http://localhost:8000/api/emergency/critical-info/PHR-IN-000001
+Authorization: Bearer TOKEN
+
+### Patient records - patient UUID or Health ID accepted
+GET http://localhost:8000/api/records?patientId=PHR-IN-000001
+Authorization: Bearer TOKEN
+
+### QR validation
+POST http://localhost:8000/api/qr/validate
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"healthId":"PHR-IN-000001","payloadHash":"72db86337dcf9d91fc1fb3f8f0edf5aeadfa81528ad329839158f2e2e4b14160"}
+
+### Consent request - requires doctor token
+POST http://localhost:8000/api/consent/request
+Authorization: Bearer DOCTOR_TOKEN
+Content-Type: application/json
+
+{"patientId":"PHR-IN-000001","purpose":"Clinical consultation"}
