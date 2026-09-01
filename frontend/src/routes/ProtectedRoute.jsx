@@ -11,3 +11,4 @@ export function ProtectedRoute({ allow, children }) {
 
   return children
 }
+ 

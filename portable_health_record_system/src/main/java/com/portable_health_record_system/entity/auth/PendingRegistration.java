@@ -33,4 +33,13 @@ public class PendingRegistration {
 
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
+
+    @Column(name = "license_number", length = 100)
+private String licenseNumber;
+
+@Column(name = "specialization", length = 160)
+private String specialization;
+
+@Column(name = "hospital_id")
+private UUID hospitalId;
 }

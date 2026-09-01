@@ -12,6 +12,7 @@ import com.portable_health_record_system.entity.patient.Patient;
 import com.portable_health_record_system.exception.AccessDeniedBusinessException;
 import com.portable_health_record_system.exception.BadRequestException;
 import com.portable_health_record_system.exception.ResourceNotFoundException;
+import com.portable_health_record_system.exception.UnauthorizedException;
 import com.portable_health_record_system.mapper.ConsentMapper;
 import com.portable_health_record_system.repository.consent.ConsentRepository;
 import com.portable_health_record_system.repository.doctor.DoctorRepository;
@@ -19,14 +20,18 @@ import com.portable_health_record_system.repository.patient.PatientRepository;
 import com.portable_health_record_system.security.CurrentUserService;
 import com.portable_health_record_system.service.auth.AuditService;
 import com.portable_health_record_system.service.notification.NotificationService;
+import org.springframework.security.core.Authentication;
+
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.UUID;
 
-@Service
+@Service 
 public class ConsentService {
     private final ConsentRepository consentRepository;
     private final PatientRepository patientRepository;
@@ -128,4 +133,85 @@ public class ConsentService {
             throw new BadRequestException("Consent request has expired");
         }
     }
+
+    @Transactional(readOnly = true)
+public List<ConsentResponse> getPendingRequestsForCurrentPatient() {
+
+    Authentication authentication =
+            SecurityContextHolder.getContext().getAuthentication();
+
+    if (authentication == null ||
+            authentication.getPrincipal() == null ||
+            "anonymousUser".equals(authentication.getPrincipal())) {
+
+        throw new UnauthorizedException(
+                "Authentication required"
+        );
+    }
+
+    String userId = authentication
+            .getName();
+
+    UUID userUuid;
+
+    try {
+        userUuid = UUID.fromString(userId);
+    } catch (IllegalArgumentException e) {
+        throw new UnauthorizedException(
+                "Invalid authenticated user"
+        );
+    }
+
+    Patient patient = patientRepository
+            .findByUserId(userUuid)
+            .orElseThrow(() ->
+                    new UnauthorizedException(
+                            "Patient profile not found"
+                    )
+            );
+
+    return consentRepository
+            .findByPatientIdAndStatus(
+                    patient.getId(),
+                    ConsentStatus.PENDING
+            )
+            .stream()
+            .map(consent -> new ConsentResponse(
+                    consent.getId(),
+                    consent.getPatient().getId(),
+                    consent.getDoctor().getId(),
+                    consent.getStatus(),
+                    consent.getPurpose(),
+                    consent.getRequestedAt(),
+                    consent.getExpiresAt()
+            ))
+            .toList();
+}
+
+@Transactional(readOnly = true)
+public ConsentResponse getConsentStatus(UUID patientId) {
+
+    User actor = currentUserService.requireUser();
+
+    Doctor doctor = doctorRepository
+            .findByUserId(actor.getId())
+            .orElseThrow(() ->
+                    new ResourceNotFoundException(
+                            "Doctor profile not found"
+                    )
+            );
+
+    Consent consent = consentRepository
+            .findFirstByPatientIdAndDoctorIdOrderByRequestedAtDesc(
+                    patientId,
+                    doctor.getId()
+            )
+            .orElseThrow(() ->
+                    new ResourceNotFoundException(
+                            "No consent request found"
+                    )
+            );
+
+    return consentMapper.toDto(consent);
+}
 }

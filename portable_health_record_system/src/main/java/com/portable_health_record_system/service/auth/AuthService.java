@@ -7,6 +7,7 @@ import com.portable_health_record_system.entity.auth.Otp;
 import com.portable_health_record_system.entity.auth.RefreshToken;
 import com.portable_health_record_system.entity.auth.Role;
 import com.portable_health_record_system.entity.auth.User;
+import com.portable_health_record_system.entity.doctor.Doctor;
 import com.portable_health_record_system.entity.patient.Patient;
 import com.portable_health_record_system.exception.UnauthorizedException;
 import com.portable_health_record_system.repository.auth.OtpRepository;
@@ -14,6 +15,7 @@ import com.portable_health_record_system.repository.auth.PendingRegistrationRepo
 import com.portable_health_record_system.repository.auth.RefreshTokenRepository;
 import com.portable_health_record_system.repository.auth.RoleRepository;
 import com.portable_health_record_system.repository.auth.UserRepository;
+import com.portable_health_record_system.repository.doctor.DoctorRepository;
 import com.portable_health_record_system.repository.patient.PatientRepository;
 import com.portable_health_record_system.security.JwtService;
 import com.portable_health_record_system.util.HashUtil;
@@ -37,6 +39,7 @@ import java.util.UUID;
 public class AuthService {
     private final UserRepository userRepository;
     private final PatientRepository patientRepository;
+    private final DoctorRepository doctorRepository;
     private final RoleRepository roleRepository;
     private final OtpRepository otpRepository;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -80,13 +83,56 @@ public OtpResponse register(RegisterRequest request) {
             .orElseThrow(() ->
                     new IllegalStateException("Role not configured"));
 
-    PendingRegistration pending = new PendingRegistration();
+PendingRegistration pending =
+        pendingRegistrationRepository
+                .findByPhoneNumber(phone)
+                .orElseGet(PendingRegistration::new);
+
 pending.setPhoneNumber(phone);
 pending.setDisplayName(request.displayName());
 pending.setRole(request.role());
+
+if (request.role() == UserRole.doctor) {
+    if (request.licenseNumber() == null ||
+            request.licenseNumber().isBlank()) {
+        throw new IllegalArgumentException(
+                "License number is required for doctors"
+        );
+    }
+
+    if (request.specialization() == null ||
+            request.specialization().isBlank()) {
+        throw new IllegalArgumentException(
+                "Specialization is required for doctors"
+        );
+    }
+
+    pending.setLicenseNumber(
+            request.licenseNumber().trim()
+    );
+
+    pending.setSpecialization(
+            request.specialization().trim()
+    );
+
+    pending.setHospitalId(
+            request.hospitalId()
+    );
+} else {
+    // Clear doctor fields if an existing pending
+    // registration is reused for another role.
+    pending.setLicenseNumber(null);
+    pending.setSpecialization(null);
+    pending.setHospitalId(null);
+}
+
 pending.setCreatedAt(Instant.now());
+
 pending.setExpiresAt(
-        Instant.now().plus(otpTtlMinutes, ChronoUnit.MINUTES)
+        Instant.now().plus(
+                otpTtlMinutes,
+                ChronoUnit.MINUTES
+        )
 );
 
 pendingRegistrationRepository.save(pending);
@@ -215,9 +261,34 @@ pendingRegistrationRepository.save(pending);
             }
 
             case doctor -> {
-                // Create Doctor after collecting
-                // doctor-specific information.
-            }
+    Doctor doctor = new Doctor();
+
+    doctor.setUser(user);
+
+    doctor.setLicenseNumber(
+            pendingRegistration.getLicenseNumber()
+    );
+
+    doctor.setSpecialization(
+            pendingRegistration.getSpecialization()
+    );
+
+    // if (pendingRegistration.getHospitalId() != null) {
+    //     Hospital hospital = hospitalRepository
+    //             .findById(
+    //                     pendingRegistration.getHospitalId()
+    //             )
+    //             .orElseThrow(() ->
+    //                     new IllegalArgumentException(
+    //                             "Hospital not found"
+    //                     )
+    //             );
+
+    //     doctor.setHospital(hospital);
+    // }
+
+    doctorRepository.save(doctor);
+}
 
             case emergency_responder -> {
                 // Create emergency responder record
@@ -260,8 +331,8 @@ pendingRegistrationRepository.save(pending);
         String phone = PhoneNumberUtil.normalize(request.phoneNumber());
         User user = userRepository.findByPhoneNumber(phone)
                 .filter(User::isEnabled)
-                .orElseThrow(() -> new UnauthorizedException("No active account exists for this phone number"));
-
+                .orElseThrow(() -> new UnauthorizedException("No active account exists for this phone number! Register first"));
+ 
         otpRepository.findTopByPhoneNumberAndConsumedFalseOrderByCreatedAtDesc(phone).ifPresent(existing -> {
             existing.setConsumed(true);
             otpRepository.save(existing);

@@ -11,11 +11,34 @@ import EmergencyAccess from '../features/emergency/pages/EmergencyAccess'
 import EligibilityCheck from '../features/government/pages/EligibilityCheck'
 import RegisterPage from '../features/auth/pages/RegisterPage'
 
+import DoctorPatients from '../features/doctor/components/DoctorPatients'
+import DoctorPatientSearch from '../features/doctor/components/DoctorPatientSearch'
+import DoctorPatientDetails from '../features/doctor/components/DoctorPatientDetails'
+import DoctorConsents from '../features/doctor/components/DoctorConsents'
+import DoctorSync from '../features/doctor/components/DoctorSync'
+import { GuestRoute } from './GuestRoute'
+
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+
+      <Route
+        path="/login"
+        element={
+          <GuestRoute>
+            <LoginPage />
+          </GuestRoute>
+        }
+      />
+
+      <Route
+        path="/register"
+        element={
+          <GuestRoute>
+            <RegisterPage />
+          </GuestRoute>
+        }
+      />
 
       <Route
         path="/patient"
@@ -50,6 +73,51 @@ export function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
+        <Route
+          path="/doctor/patients"
+          element={
+            <ProtectedRoute allow={[USER_ROLES.DOCTOR]}>
+              <DoctorPatients />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/doctor/patients/search"
+          element={
+            <ProtectedRoute allow={[USER_ROLES.DOCTOR]}>
+              <DoctorPatientSearch />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/doctor/patients/:patientId"
+          element={
+            <ProtectedRoute allow={[USER_ROLES.DOCTOR]}>
+              <DoctorPatientDetails />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/doctor/consents"
+          element={
+            <ProtectedRoute allow={[USER_ROLES.DOCTOR]}>
+              <DoctorConsents />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/doctor/sync"
+          element={
+            <ProtectedRoute allow={[USER_ROLES.DOCTOR]}>
+              <DoctorSync />
+            </ProtectedRoute>
+          }
+        />
 
       {/* Emergency access deliberately has NO consent gate, but still requires
           an authenticated + verified responder session — "no consent from the

@@ -16,6 +16,10 @@ export default function PatientDashboard() {
   const [criticalInfo, setCriticalInfo] = useState(null)
   const [isEditingProfile, setIsEditingProfile] = useState(false)
   const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [pendingConsents, setPendingConsents] = useState([])
+const [isLoadingConsents, setIsLoadingConsents] = useState(false)
+const [consentError, setConsentError] = useState(null)
+const [processingConsentId, setProcessingConsentId] = useState(null)
 
   const [profileForm, setProfileForm] = useState({
     displayName: '',
@@ -96,6 +100,40 @@ const handleSaveProfile = async () => {
   }
 }
 
+const loadPendingConsents = useCallback(async () => {
+  if (!session?.userId) return
+
+  try {
+    setIsLoadingConsents(true)
+    setConsentError(null)
+
+    const data = await apiClient.getPendingConsentRequests()
+
+    setPendingConsents(
+      Array.isArray(data)
+        ? data
+        : data?.consents ?? []
+    )
+  } catch (err) {
+    console.error(
+      'Failed to load pending consent requests:',
+      err
+    )
+
+    setConsentError(
+      err?.message ?? 'Failed to load consent requests.'
+    )
+  } finally {
+    setIsLoadingConsents(false)
+  }
+}, [session?.userId])
+
+useEffect(() => {
+  if (activeTab === 'access') {
+    loadPendingConsents()
+  }
+}, [activeTab, loadPendingConsents])
+
 const handleCancelEdit = () => {
   if (profile) {
     setProfileForm({
@@ -107,6 +145,50 @@ const handleCancelEdit = () => {
   }
 
   setIsEditingProfile(false)
+}
+
+const handleApproveConsent = async (consentId) => {
+  try {
+    setProcessingConsentId(consentId)
+    setConsentError(null)
+
+    await apiClient.approveConsent(consentId)
+
+    await loadPendingConsents()
+  } catch (err) {
+    console.error(
+      'Failed to approve consent:',
+      err
+    )
+
+    setConsentError(
+      err?.message ?? 'Failed to approve consent request.'
+    )
+  } finally {
+    setProcessingConsentId(null)
+  }
+}
+
+const handleDenyConsent = async (consentId) => {
+  try {
+    setProcessingConsentId(consentId)
+    setConsentError(null)
+
+    await apiClient.denyConsent(consentId)
+
+    await loadPendingConsents()
+  } catch (err) {
+    console.error(
+      'Failed to deny consent:',
+      err
+    )
+
+    setConsentError(
+      err?.message ?? 'Failed to deny consent request.'
+    )
+  } finally {
+    setProcessingConsentId(null)
+  }
 }
 
   const loadRecords = useCallback(async () => {
@@ -625,49 +707,271 @@ const handleCancelEdit = () => {
         {/* ================= ACCESS ================= */}
 
         {activeTab === 'access' && (
-          <Card>
+  <div className="flex flex-col gap-4">
 
-            <div className="mb-5">
-              <h2 className="text-lg font-semibold text-neutral-900">
-                Who Can Access My Records?
-              </h2>
+    <Card>
+      <div className="flex items-start justify-between gap-4">
 
-              <p className="mt-1 text-sm text-neutral-500">
-                Access to your health information is controlled
-                by your consent and emergency-access rules.
-              </p>
+        <div>
+          <h2 className="text-lg font-semibold text-neutral-900">
+            Record Access
+          </h2>
+
+          <p className="mt-1 text-sm text-neutral-500">
+            Review doctors requesting access to your medical
+            records.
+          </p>
+        </div>
+
+        <Button
+          type="button"
+          onClick={loadPendingConsents}
+          disabled={isLoadingConsents}
+        >
+          {isLoadingConsents ? 'Refreshing...' : 'Refresh'}
+        </Button>
+
+      </div>
+
+      {consentError && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm text-red-700">
+            {consentError}
+          </p>
+        </div>
+      )}
+
+      <div className="mt-5">
+
+        {isLoadingConsents ? (
+
+          <p className="text-sm text-neutral-500">
+            Loading access requests...
+          </p>
+
+        ) : pendingConsents.length === 0 ? (
+
+          <div className="rounded-lg border border-dashed border-neutral-300 p-8 text-center">
+
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100">
+              <span className="text-lg">
+                ✓
+              </span>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <h3 className="mt-3 text-sm font-semibold text-neutral-800">
+              No pending access requests
+            </h3>
 
-              <AccessCard
-                title="Doctors"
-                description="Doctors can access your records after you provide the required consent."
-                tone="trust"
-              />
+            <p className="mt-1 text-sm text-neutral-500">
+              Doctors requesting access to your records will
+              appear here.
+            </p>
 
-              <AccessCard
-                title="Emergency Responders"
-                description="Authorized emergency responders can access permitted critical information during emergencies."
-                tone="critical"
-              />
+          </div>
 
-              <AccessCard
-                title="Government Verification"
-                description="Government verification is limited to the information required for eligibility checks."
-                tone="neutral"
-              />
+        ) : (
 
-              <AccessCard
-                title="You"
-                description="You can view your own health information and record history from this portal."
-                tone="trust"
-              />
+          <div className="flex flex-col gap-3">
 
-            </div>
+            {pendingConsents.map((consent) => (
 
-          </Card>
+              <div
+                key={consent.consentId}
+                className="rounded-xl border border-neutral-200 p-5"
+              >
+
+                <div className="flex flex-col gap-4">
+
+                  <div className="flex items-start justify-between gap-4">
+
+                    <div>
+
+                      <div className="flex items-center gap-2">
+
+                        <h3 className="font-semibold text-neutral-900">
+                          Doctor Access Request
+                        </h3>
+
+                        <Badge tone="trust">
+                          Pending
+                        </Badge>
+
+                      </div>
+
+                      <p className="mt-2 text-sm text-neutral-600">
+                        A doctor is requesting access to your
+                        medical records.
+                      </p>
+
+                    </div>
+
+                  </div>
+
+                  <div className="grid gap-3 rounded-lg bg-neutral-50 p-4 sm:grid-cols-2">
+
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                        Doctor ID
+                      </p>
+
+                      <p className="mt-1 break-all font-mono text-sm text-neutral-800">
+                        {consent.doctorId}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                        Purpose
+                      </p>
+
+                      <p className="mt-1 text-sm text-neutral-800">
+                        {consent.purpose}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                        Requested
+                      </p>
+
+                      <p className="mt-1 text-sm text-neutral-800">
+                        {consent.requestedAt
+                          ? new Date(
+                              consent.requestedAt
+                            ).toLocaleString()
+                          : 'Unavailable'}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                        Expires
+                      </p>
+
+                      <p className="mt-1 text-sm text-neutral-800">
+                        {consent.expiresAt
+                          ? new Date(
+                              consent.expiresAt
+                            ).toLocaleString()
+                          : 'Unavailable'}
+                      </p>
+                    </div>
+
+                  </div>
+
+                  <div className="rounded-lg border border-neutral-200 p-4">
+
+                    <p className="text-sm font-medium text-neutral-800">
+                      Allow this doctor to access your records?
+                    </p>
+
+                    <p className="mt-1 text-sm leading-5 text-neutral-500">
+                      Approving this request will allow the
+                      requesting doctor to access your protected
+                      medical records according to their
+                      authorization.
+                    </p>
+
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        handleApproveConsent(
+                          consent.consentId
+                        )
+                      }
+                      disabled={
+                        processingConsentId ===
+                        consent.consentId
+                      }
+                    >
+                      {processingConsentId ===
+                      consent.consentId
+                        ? 'Processing...'
+                        : 'Approve Access'}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        handleDenyConsent(
+                          consent.consentId
+                        )
+                      }
+                      disabled={
+                        processingConsentId ===
+                        consent.consentId
+                      }
+                    >
+                      Deny
+                    </Button>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            ))}
+
+          </div>
+
         )}
+
+      </div>
+
+    </Card>
+
+    <Card>
+
+      <div className="mb-5">
+        <h2 className="text-lg font-semibold text-neutral-900">
+          Who Can Access My Records?
+        </h2>
+
+        <p className="mt-1 text-sm text-neutral-500">
+          Access to your health information is controlled by
+          your consent and emergency-access rules.
+        </p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+
+        <AccessCard
+          title="Doctors"
+          description="Doctors can access your records after you provide the required consent."
+          tone="trust"
+        />
+
+        <AccessCard
+          title="Emergency Responders"
+          description="Authorized emergency responders can access permitted critical information during emergencies."
+          tone="critical"
+        />
+
+        <AccessCard
+          title="Government Verification"
+          description="Government verification is limited to the information required for eligibility checks."
+          tone="neutral"
+        />
+
+        <AccessCard
+          title="You"
+          description="You can view your own health information and record history from this portal."
+          tone="trust"
+        />
+
+      </div>
+
+    </Card>
+
+  </div>
+)}
 
         {/* Recent activity */}
         {activeTab === 'overview' && (

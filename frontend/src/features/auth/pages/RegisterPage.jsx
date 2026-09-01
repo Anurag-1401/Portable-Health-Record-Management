@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, Link, replace } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { authApi } from '../api/authApi'
 import { setToken } from '../../../lib/apiClient'
 import { Button } from '../../../components/ui/Button'
@@ -9,6 +9,12 @@ export default function RegisterPage() {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [role, setRole] = useState('patient')
+
+  // Doctor-specific fields
+  const [licenseNumber, setLicenseNumber] = useState('')
+  const [specialization, setSpecialization] = useState('')
+  const [hospitalId, setHospitalId] = useState('')
+
   const [otp, setOtp] = useState('')
   const [step, setStep] = useState('details')
   const [error, setError] = useState(null)
@@ -19,13 +25,34 @@ export default function RegisterPage() {
   async function handleRegister(e) {
     e.preventDefault()
     setError(null)
+
+    // Extra frontend validation for doctors
+    if (role === 'doctor') {
+      if (!licenseNumber.trim()) {
+        setError('License number is required for doctors.')
+        return
+      }
+
+      if (!specialization.trim()) {
+        setError('Specialization is required for doctors.')
+        return
+      }
+    }
+
     setIsSubmitting(true)
 
     try {
       const res = await authApi.register(
         phoneNumber,
         displayName,
-        role
+        role,
+        role === 'doctor'
+          ? {
+              licenseNumber: licenseNumber.trim(),
+              specialization: specialization.trim(),
+              hospitalId: hospitalId || null,
+            }
+          : null
       )
 
       console.log(res)
@@ -51,7 +78,7 @@ export default function RegisterPage() {
 
       await setToken(session.token)
 
-      navigate(roleHomePath(session.role),{replace:true})
+      navigate(roleHomePath(session.role), { replace: true })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -75,6 +102,7 @@ export default function RegisterPage() {
             onSubmit={handleRegister}
             className="mt-5 flex flex-col gap-3"
           >
+            {/* Full Name */}
             <label className="text-sm text-neutral-700">
               Full name
 
@@ -88,6 +116,7 @@ export default function RegisterPage() {
               />
             </label>
 
+            {/* Phone */}
             <label className="text-sm text-neutral-700">
               Phone number
 
@@ -101,12 +130,22 @@ export default function RegisterPage() {
               />
             </label>
 
+            {/* Role */}
             <label className="text-sm text-neutral-700">
               Register as
 
               <select
                 value={role}
-                onChange={(e) => setRole(e.target.value)}
+                onChange={(e) => {
+                  setRole(e.target.value)
+
+                  // Clear doctor fields when switching away
+                  if (e.target.value !== 'doctor') {
+                    setLicenseNumber('')
+                    setSpecialization('')
+                    setHospitalId('')
+                  }
+                }}
                 className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
               >
                 <option value="patient">Patient</option>
@@ -120,8 +159,74 @@ export default function RegisterPage() {
               </select>
             </label>
 
+            {/* Doctor-specific fields */}
+            {role === 'doctor' && (
+              <div className="mt-2 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+                <h2 className="text-sm font-semibold text-neutral-800">
+                  Doctor Information
+                </h2>
+
+                <p className="mt-1 text-xs text-neutral-500">
+                  Please provide your professional information.
+                </p>
+
+                <div className="mt-4 flex flex-col gap-3">
+                  {/* License Number */}
+                  <label className="text-sm text-neutral-700">
+                    Medical License Number
+                    <span className="text-emergency-600"> *</span>
+
+                    <input
+                      type="text"
+                      required={role === 'doctor'}
+                      value={licenseNumber}
+                      onChange={(e) =>
+                        setLicenseNumber(e.target.value)
+                      }
+                      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
+                      placeholder="Enter your license number"
+                    />
+                  </label>
+
+                  {/* Specialization */}
+                  <label className="text-sm text-neutral-700">
+                    Specialization
+                    <span className="text-emergency-600"> *</span>
+
+                    <input
+                      type="text"
+                      required={role === 'doctor'}
+                      value={specialization}
+                      onChange={(e) =>
+                        setSpecialization(e.target.value)
+                      }
+                      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
+                      placeholder="e.g. Cardiology"
+                    />
+                  </label>
+
+                  {/* Hospital */}
+                  <label className="text-sm text-neutral-700">
+                    Hospital
+
+                    <input
+                      type="text"
+                      value={hospitalId}
+                      onChange={(e) =>
+                        setHospitalId(e.target.value)
+                      }
+                      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
+                      placeholder="Hospital ID (optional)"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Sending OTP...' : 'Create Account'}
+              {isSubmitting
+                ? 'Sending OTP...'
+                : 'Create Account'}
             </Button>
           </form>
         )}
@@ -146,7 +251,9 @@ export default function RegisterPage() {
             </label>
 
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Verifying...' : 'Verify & continue'}
+              {isSubmitting
+                ? 'Verifying...'
+                : 'Verify & continue'}
             </Button>
           </form>
         )}

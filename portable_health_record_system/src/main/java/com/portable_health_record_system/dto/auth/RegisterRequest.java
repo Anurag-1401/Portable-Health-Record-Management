@@ -1,5 +1,7 @@
 package com.portable_health_record_system.dto.auth;
 
+import java.util.UUID;
+
 import com.portable_health_record_system.common.UserRole;
 
 import jakarta.validation.constraints.NotBlank;
@@ -11,6 +13,9 @@ public record RegisterRequest(
     String phoneNumber,
     @NotBlank(message = "displayName is required")
     String displayName,
-    UserRole role
+    UserRole role,
+    String licenseNumber,
+    String specialization,
+    UUID hospitalId
 ) {
 }

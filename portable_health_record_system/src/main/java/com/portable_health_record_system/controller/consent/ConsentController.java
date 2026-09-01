@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.security.access.prepost.PreAuthorize;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -35,4 +36,18 @@ public class ConsentController {
     public ConsentResponse deny(@PathVariable UUID consentId) {
         return consentService.deny(consentId);
     }
+
+    @PreAuthorize("hasAnyRole('PATIENT', 'ADMIN')")
+@GetMapping("/pending")
+public List<ConsentResponse> pendingRequests() {
+    return consentService.getPendingRequestsForCurrentPatient();
+}
+
+@PreAuthorize("hasAnyRole('DOCTOR', 'ADMIN')")
+@GetMapping("/status/{patientId}")
+public ConsentResponse getConsentStatus(
+        @PathVariable UUID patientId
+) {
+    return consentService.getConsentStatus(patientId);
+}
 }

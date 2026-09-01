@@ -98,6 +98,8 @@ export function AuthProvider({ children }) {
     await clearToken()
     await clearRefreshToken()
     await clearAuthSession()
+    setSession(null)
+    // window.location.reload()
   }, [])
 
   return (

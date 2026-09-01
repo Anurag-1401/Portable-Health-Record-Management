@@ -8,6 +8,52 @@
     <meta name="description" content="Portable, patient-owned health records for India's migrant workforce." />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>Portable Health Record</title>
+
+    <!-- Global Tab Isolation Script (localStorage + IndexedDB) -->
+    <script>
+      (function() {
+        // 1. Assign a unique name to this specific tab
+        if (!window.name) {
+          window.name = "tab_" + Math.random().toString(36).substring(2, 9);
+        }
+
+        const prefix = window.name + "_";
+
+        // ─── PART A: INTERCEPT LOCALSTORAGE ───
+        const originalSetItem = localStorage.setItem.bind(localStorage);
+        const originalGetItem = localStorage.getItem.bind(localStorage);
+        const originalRemoveItem = localStorage.removeItem.bind(localStorage);
+
+        Object.defineProperty(window, 'localStorage', {
+          value: {
+            setItem: (key, value) => originalSetItem(prefix + key, value),
+            getItem: (key) => originalGetItem(prefix + key),
+            removeItem: (key) => originalRemoveItem(prefix + key),
+            clear: () => {
+              Object.keys(localStorage).forEach(key => {
+                if (key.startsWith(prefix)) originalRemoveItem(key);
+              });
+            },
+            get length() {
+              return Object.keys(localStorage).filter(key => key.startsWith(prefix)).length;
+            },
+            key: (index) => {
+              const keys = Object.keys(localStorage).filter(key => key.startsWith(prefix));
+              return keys[index] ? keys[index].replace(prefix, '') : null;
+            }
+          },
+          writable: true, configurable: true
+        });
+
+        // ─── PART B: INTERCEPT INDEXEDDB (For Capacitor) ───
+        const originalOpen = indexedDB.open.bind(indexedDB);
+        indexedDB.open = function(name, version) {
+          // Force Capacitor databases to include the unique tab prefix
+          const isolatedName = prefix + name;
+          return originalOpen(isolatedName, version);
+        };
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

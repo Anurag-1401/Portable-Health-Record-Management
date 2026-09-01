@@ -1,6 +1,7 @@
 package com.portable_health_record_system.service.record;
 
 import com.portable_health_record_system.common.AuditAction;
+import com.portable_health_record_system.common.ConsentStatus;
 import com.portable_health_record_system.dto.record.MedicalRecordDto;
 import com.portable_health_record_system.dto.record.RecordWriteRequest;
 import com.portable_health_record_system.entity.auth.User;
@@ -35,7 +36,7 @@ public class RecordService {
     private final RecordVersionRepository recordVersionRepository;
     private final PatientRepository patientRepository;
     private final RecordMapper recordMapper;
-    private final CurrentUserService currentUserService;
+private final CurrentUserService currentUserService;
     private final HashChainService hashChainService;
     private final AuditService auditService;
     private final com.portable_health_record_system.repository.consent.ConsentRepository consentRepository;
@@ -144,12 +145,28 @@ public class RecordService {
                 if (!patient.getUser().getId().equals(user.getId())) throw new AccessDeniedBusinessException("Patients may only read their own records");
             }
             case doctor -> {
-                var doctor = patient.getPrimaryDoctor();
-                boolean approved = doctor != null && doctor.getUser().getId().equals(user.getId()) &&
-                        consentRepository.findByPatientIdAndStatus(patient.getId(), com.portable_health_record_system.common.ConsentStatus.APPROVED).stream()
-                                .anyMatch(c -> c.getDoctor().getUser().getId().equals(user.getId()));
-                if (!approved) throw new AccessDeniedBusinessException("Doctor access requires approved patient consent");
-            }
+
+    boolean approved =
+            consentRepository
+                    .findByPatientIdAndStatus(
+                            patient.getId(),
+                            ConsentStatus.APPROVED
+                    )
+                    .stream()
+                    .anyMatch(c ->
+                            c.getDoctor() != null &&
+                            c.getDoctor()
+                                    .getUser()
+                                    .getId()
+                                    .equals(user.getId())
+                    );
+
+    if (!approved) {
+        throw new AccessDeniedBusinessException(
+                "Doctor access requires approved patient consent"
+        );
+    }
+}
             default -> throw new AccessDeniedBusinessException("This role cannot access full medical history");
         }
     }
@@ -161,12 +178,28 @@ public class RecordService {
                 if (!patient.getUser().getId().equals(user.getId())) throw new AccessDeniedBusinessException("Patients may only modify their own records");
             }
             case doctor -> {
-                var doctor = patient.getPrimaryDoctor();
-                boolean approved = doctor != null && doctor.getUser().getId().equals(user.getId()) &&
-                        consentRepository.findByPatientIdAndStatus(patient.getId(), com.portable_health_record_system.common.ConsentStatus.APPROVED).stream()
-                                .anyMatch(c -> c.getDoctor().getUser().getId().equals(user.getId()));
-                if (!approved) throw new AccessDeniedBusinessException("Doctor write access requires approved patient consent");
-            }
+
+    boolean approved =
+            consentRepository
+                    .findByPatientIdAndStatus(
+                            patient.getId(),
+                            ConsentStatus.APPROVED
+                    )
+                    .stream()
+                    .anyMatch(c ->
+                            c.getDoctor() != null &&
+                            c.getDoctor()
+                                    .getUser()
+                                    .getId()
+                                    .equals(user.getId())
+                    );
+
+    if (!approved) {
+        throw new AccessDeniedBusinessException(
+                "Doctor write access requires approved patient consent"
+        );
+    }
+}
             default -> throw new AccessDeniedBusinessException("This role cannot modify medical history");
         }
     }

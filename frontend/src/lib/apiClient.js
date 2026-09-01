@@ -78,6 +78,16 @@ export async function clearAuthSession() {
   })
 }
 
+function isAuthEndpoint(path) {
+  return (
+    path === '/auth/otp/request' ||
+    path === '/auth/otp/verify' ||
+    path === '/auth/register' ||
+    path === '/auth/register/verify' ||
+    path === '/auth/refresh'
+  )
+}
+
 async function request(
   path,
   {
@@ -118,7 +128,7 @@ async function request(
   if (
     (res.status === 401 || res.status === 403) &&
     !isRetry &&
-    path !== '/auth/refresh'
+     !isAuthEndpoint(path)
   ) {
     try {
       await refreshAccessToken()
@@ -141,24 +151,34 @@ async function request(
        * Refresh token is also invalid/expired.
        * User must login again.
        */
+
+
       await clearToken()
       await clearRefreshToken()
       await clearAuthSession()
 
-      throw new Error(
+       const error = new Error(
         'Your session has expired. Please login again.'
       )
+
+      error.status = 401
+      error.code = 'SESSION_EXPIRED'
+
+      throw error
     }
   }
 
   if (!res.ok) {
     const errorBody =
       await res.json().catch(() => ({}))
-
-    const error = new Error(
+      
+     const message =
       errorBody.message ??
+      errorBody.error ??
+      errorBody.detail ??
       `Request failed: ${res.status}`
-    )
+
+    const error = new Error(message)
 
     error.status = res.status
     error.body = errorBody
@@ -177,14 +197,27 @@ export const apiClient = {
   request,
 
   // Auth
-  register: (phoneNumber, displayName, role) =>
-  request('/auth/register', {
-    method: 'POST',
-    body: {
+  register: (
       phoneNumber,
       displayName,
       role,
-    },
+      doctorDetails = null
+    ) =>
+      request('/auth/register', {
+        method: 'POST',
+        body: {
+          phoneNumber,
+          displayName,
+          role,
+        
+          ...(role === 'doctor'
+            ? {
+                licenseNumber: doctorDetails?.licenseNumber,
+                specialization: doctorDetails?.specialization,
+                hospitalId: doctorDetails?.hospitalId || null,
+              }
+            : {}),
+        },
   }),
 
 verifyRegistration: (phoneNumber, otp) =>
@@ -224,22 +257,62 @@ updateMyProfile: (data) =>
     request(
       `/records?patientId=${encodeURIComponent(patientId)}`
     ),
+
+    getDoctorPatient: (patientId) =>
+  request(`/patients/${patientId}`),
+
+getDoctorPatientRecords: (patientId) =>
+  request(`/patients/${patientId}/records`),
+
+    searchPatient: (healthId) =>
+  request(
+    `/patients/search?healthId=${encodeURIComponent(
+      healthId
+    )}`
+  ),
   
   getCriticalInfo: (healthId) =>
     request(`/emergency/critical-info/${encodeURIComponent(healthId)}`),
   
   // Consent
   requestConsent: (patientId, purpose) =>
-    request('/consent/request', {
-      method: 'POST',
-      body: {
-        patientId,
-        purpose,
-      },
-    }),
+  request('/consent/request', {
+    method: 'POST',
+    body: {
+      patientId,
+      purpose,
+    },
+  }),
+
+  getPendingConsentRequests: () =>
+  request('/consent/pending'),
+
+  getConsentStatus: (patientId) =>
+  request(`/consent/status/${patientId}`),
+
+  approveConsent: (consentId) =>
+  request(`/consent/${consentId}/approve`, {
+    method: 'POST',
+  }),
+
+denyConsent: (consentId) =>
+  request(`/consent/${consentId}/deny`, {
+    method: 'POST',
+  }),
 
   // Sync — called by src/lib/syncQueue.js, not directly by feature code
   syncRecordWrite: (queueEntry) => request('/sync/record', { method: 'POST', body: queueEntry }),
+
+  getMyProfile: () =>
+  request('/profile/me', {
+    method: 'GET',
+  }),
+
+updateMyProfile: (data) =>
+  request('/profile/me', {
+    method: 'PATCH',
+    body: data,
+  }),
 }
 
 async function refreshAccessToken() {
@@ -259,8 +332,22 @@ async function refreshAccessToken() {
     }),
   })
 
-  if (!res.ok) {
-    throw new Error('Refresh token expired or invalid')
+   if (!res.ok) {
+    const errorBody =
+      await res.json().catch(() => ({}))
+
+    const message =
+      errorBody.message ??
+      errorBody.error ??
+      errorBody.detail ??
+      `Refresh failed: ${res.status}`
+
+    const error = new Error(message)
+
+    error.status = res.status
+    error.body = errorBody
+
+    throw error
   }
 
   const data = await res.json()
