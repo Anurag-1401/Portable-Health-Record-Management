@@ -20,4 +20,7 @@ public class Hospital extends EntityBase {
 
     @Column(name = "address", length = 500)
     private String address;
+
+    @Column(length = 6)
+    private String pincode;
 }

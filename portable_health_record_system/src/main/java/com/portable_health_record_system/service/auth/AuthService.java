@@ -21,6 +21,8 @@ import com.portable_health_record_system.security.JwtService;
 import com.portable_health_record_system.util.HashUtil;
 import com.portable_health_record_system.util.PhoneNumberUtil;
 import com.portable_health_record_system.entity.auth.PendingRegistration;
+import com.portable_health_record_system.entity.doctor.Hospital;
+import com.portable_health_record_system.repository.hospital.HospitalRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -48,6 +50,7 @@ public class AuthService {
     private final OtpDeliveryService otpDeliveryService;
     private final AuditService auditService;
     private final SecureRandom secureRandom = new SecureRandom();
+    private final HospitalRepository hospitalRepository;
     private final PendingRegistrationRepository pendingRegistrationRepository;
 
 
@@ -115,9 +118,15 @@ if (request.role() == UserRole.doctor) {
             request.specialization().trim()
     );
 
-    pending.setHospitalId(
-            request.hospitalId()
+    if (request.hospitalId() == null) {
+    throw new IllegalArgumentException(
+            "Hospital is required for doctors"
     );
+}
+
+pending.setHospitalId(
+        request.hospitalId()
+);
 } else {
     // Clear doctor fields if an existing pending
     // registration is reused for another role.
@@ -260,7 +269,7 @@ pendingRegistrationRepository.save(pending);
                 patientRepository.save(patient);
             }
 
-            case doctor -> {
+case doctor -> {
     Doctor doctor = new Doctor();
 
     doctor.setUser(user);
@@ -273,23 +282,24 @@ pendingRegistrationRepository.save(pending);
             pendingRegistration.getSpecialization()
     );
 
-    // if (pendingRegistration.getHospitalId() != null) {
-    //     Hospital hospital = hospitalRepository
-    //             .findById(
-    //                     pendingRegistration.getHospitalId()
-    //             )
-    //             .orElseThrow(() ->
-    //                     new IllegalArgumentException(
-    //                             "Hospital not found"
-    //                     )
-    //             );
+    // Assign hospital selected during registration
+    if (pendingRegistration.getHospitalId() != null) {
 
-    //     doctor.setHospital(hospital);
-    // }
+        Hospital hospital = hospitalRepository
+                .findById(
+                        pendingRegistration.getHospitalId()
+                )
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Selected hospital not found"
+                        )
+                );
+
+        doctor.setHospital(hospital);
+    }
 
     doctorRepository.save(doctor);
 }
-
             case emergency_responder -> {
                 // Create emergency responder record
                 // if required.

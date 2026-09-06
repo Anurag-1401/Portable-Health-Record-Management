@@ -13,8 +13,10 @@ export default function RegisterPage() {
   // Doctor-specific fields
   const [licenseNumber, setLicenseNumber] = useState('')
   const [specialization, setSpecialization] = useState('')
-  const [hospitalId, setHospitalId] = useState('')
-
+  const [pincode, setPincode] = useState('')
+  const [hospitals, setHospitals] = useState([])
+  const [selectedHospitalId, setSelectedHospitalId] = useState('')
+  const [isLoadingHospitals, setIsLoadingHospitals] = useState(false)
   const [otp, setOtp] = useState('')
   const [step, setStep] = useState('details')
   const [error, setError] = useState(null)
@@ -28,16 +30,26 @@ export default function RegisterPage() {
 
     // Extra frontend validation for doctors
     if (role === 'doctor') {
-      if (!licenseNumber.trim()) {
-        setError('License number is required for doctors.')
-        return
-      }
+  if (!licenseNumber.trim()) {
+    setError('License number is required for doctors.')
+    return
+  }
 
-      if (!specialization.trim()) {
-        setError('Specialization is required for doctors.')
-        return
-      }
-    }
+  if (!specialization.trim()) {
+    setError('Specialization is required for doctors.')
+    return
+  }
+
+  if (!/^\d{6}$/.test(pincode)) {
+    setError('A valid 6-digit serving-area PIN code is required.')
+    return
+  }
+
+  if (!selectedHospitalId) {
+    setError('Please select the hospital where you are currently serving.')
+    return
+  }
+}
 
     setIsSubmitting(true)
 
@@ -50,12 +62,10 @@ export default function RegisterPage() {
           ? {
               licenseNumber: licenseNumber.trim(),
               specialization: specialization.trim(),
-              hospitalId: hospitalId || null,
+              hospitalId: selectedHospitalId || null,
             }
           : null
       )
-
-      console.log(res)
 
       setStep('otp')
     } catch (err) {
@@ -64,6 +74,32 @@ export default function RegisterPage() {
       setIsSubmitting(false)
     }
   }
+
+  async function findHospitals() {
+  if (!/^\d{6}$/.test(pincode)) {
+    setError('Please enter a valid 6-digit PIN code.')
+    return
+  }
+
+  setError(null)
+  setHospitals([])
+  setSelectedHospitalId('')
+  setIsLoadingHospitals(true)
+
+  try {
+    const results = await authApi.getHospitalsByPincode(pincode)
+
+    setHospitals(results)
+
+    if (results.length === 0) {
+      setError('No hospitals found for this PIN code.')
+    }
+  } catch (err) {
+    setError(err.message || 'Failed to find hospitals.')
+  } finally {
+    setIsLoadingHospitals(false)
+  }
+}
 
   async function handleVerifyRegistration(e) {
     e.preventDefault()
@@ -206,19 +242,67 @@ export default function RegisterPage() {
                   </label>
 
                   {/* Hospital */}
-                  <label className="text-sm text-neutral-700">
-                    Hospital
+                  {/* Serving Area PIN Code */}
+<label className="text-sm text-neutral-700">
+  Serving Area PIN Code
+  <span className="text-emergency-600"> *</span>
 
-                    <input
-                      type="text"
-                      value={hospitalId}
-                      onChange={(e) =>
-                        setHospitalId(e.target.value)
-                      }
-                      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
-                      placeholder="Hospital ID (optional)"
-                    />
-                  </label>
+  <div className="mt-1 flex gap-2">
+    <input
+      type="text"
+      required
+      maxLength={6}
+      value={pincode}
+      onChange={(e) => {
+        const value = e.target.value.replace(/\D/g, '')
+        setPincode(value)
+        setHospitals([])
+        setSelectedHospitalId('')
+      }}
+      className="w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
+      placeholder="e.g. 400001"
+    />
+
+    <Button
+      type="button"
+      onClick={findHospitals}
+      disabled={isLoadingHospitals || pincode.length !== 6}
+    >
+      {isLoadingHospitals ? 'Finding...' : 'Find'}
+    </Button>
+  </div>
+</label>
+
+{/* Hospital Selection */}
+{hospitals.length > 0 && (
+  <label className="text-sm text-neutral-700">
+    Select Hospital
+    <span className="text-emergency-600"> *</span>
+
+    <select
+      required
+      value={selectedHospitalId}
+      onChange={(e) => setSelectedHospitalId(e.target.value)}
+      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
+    >
+      <option value="">
+        Select the hospital where you serve
+      </option>
+
+      {hospitals.map((hospital) => (
+        <option
+          key={hospital.id}
+          value={hospital.id}
+        >
+          {hospital.name}
+          {hospital.address
+            ? ` — ${hospital.address}`
+            : ''}
+        </option>
+      ))}
+    </select>
+  </label>
+)}
                 </div>
               </div>
             )}

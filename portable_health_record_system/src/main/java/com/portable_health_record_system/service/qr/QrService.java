@@ -4,7 +4,6 @@ import com.portable_health_record_system.common.AuditAction;
 import com.portable_health_record_system.common.UserRole;
 import com.portable_health_record_system.dto.qr.QrValidationRequest;
 import com.portable_health_record_system.dto.qr.QrValidationResponse;
-import com.portable_health_record_system.entity.qr.QrToken;
 import com.portable_health_record_system.exception.AccessDeniedBusinessException;
 import com.portable_health_record_system.exception.ResourceNotFoundException;
 import com.portable_health_record_system.repository.patient.PatientRepository;

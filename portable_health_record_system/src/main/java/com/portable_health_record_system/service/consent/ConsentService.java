@@ -20,6 +20,9 @@ import com.portable_health_record_system.repository.patient.PatientRepository;
 import com.portable_health_record_system.security.CurrentUserService;
 import com.portable_health_record_system.service.auth.AuditService;
 import com.portable_health_record_system.service.notification.NotificationService;
+
+import lombok.RequiredArgsConstructor;
+
 import org.springframework.security.core.Authentication;
 
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -32,6 +35,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Service 
+@RequiredArgsConstructor
 public class ConsentService {
     private final ConsentRepository consentRepository;
     private final PatientRepository patientRepository;
@@ -40,22 +44,6 @@ public class ConsentService {
     private final ConsentMapper consentMapper;
     private final AuditService auditService;
     private final NotificationService notificationService;
-
-    public ConsentService(ConsentRepository consentRepository,
-                          PatientRepository patientRepository,
-                          DoctorRepository doctorRepository,
-                          CurrentUserService currentUserService,
-                          ConsentMapper consentMapper,
-                          AuditService auditService,
-                          NotificationService notificationService) {
-        this.consentRepository = consentRepository;
-        this.patientRepository = patientRepository;
-        this.doctorRepository = doctorRepository;
-        this.currentUserService = currentUserService;
-        this.consentMapper = consentMapper;
-        this.auditService = auditService;
-        this.notificationService = notificationService;
-    }
 
     @Transactional
     public ConsentResponse request(ConsentRequest request) {
@@ -213,5 +201,46 @@ public ConsentResponse getConsentStatus(UUID patientId) {
             );
 
     return consentMapper.toDto(consent);
+}
+
+@Transactional(readOnly = true)
+public List<ConsentResponse> getPendingRequestsForCurrentDoctor() {
+
+    User actor = currentUserService.requireUser();
+
+    Doctor doctor = doctorRepository
+            .findByUserId(actor.getId())
+            .orElseThrow(() ->
+                    new ResourceNotFoundException("Doctor profile not found")
+            );
+
+    return consentRepository
+            .findByDoctorIdAndStatus(
+                    doctor.getId(),
+                    ConsentStatus.PENDING
+            )
+            .stream()
+            .map(consentMapper::toDto)
+            .toList();
+}
+
+@Transactional(readOnly = true)
+public List<ConsentResponse> getApprovedPatientsForCurrentDoctor() {
+
+    User actor = currentUserService.requireUser();
+
+    Doctor doctor = doctorRepository
+            .findByUserId(actor.getId())
+            .orElseThrow(() ->
+                    new ResourceNotFoundException(
+                            "Doctor profile not found"));
+
+    return consentRepository
+            .findByDoctorIdAndStatus(
+                    doctor.getId(),
+                    ConsentStatus.APPROVED)
+            .stream()
+            .map(consentMapper::toDto)
+            .toList();
 }
 }

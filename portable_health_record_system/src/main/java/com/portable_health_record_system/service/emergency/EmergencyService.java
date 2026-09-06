@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.List;
 
 @Service
 public class EmergencyService {
@@ -56,7 +55,6 @@ public class EmergencyService {
                 patient.getChronicConditions().stream().map(this::toCondition).toList());
     }
 
-    @SuppressWarnings("unchecked")
     private CriticalInfoResponse.Allergy toAllergy(Object value) {
         if (value instanceof java.util.Map<?, ?> map) {
             return new CriticalInfoResponse.Allergy(String.valueOf(map.containsKey("allergen") ? map.get("allergen") : "Unknown"), String.valueOf(map.containsKey("severity") ? map.get("severity") : "Unknown"));

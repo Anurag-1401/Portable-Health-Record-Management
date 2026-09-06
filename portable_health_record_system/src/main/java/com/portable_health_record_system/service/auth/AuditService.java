@@ -13,62 +13,132 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-
 import java.time.Instant;
 import java.util.List;
 
 @Service
 @RequiredArgsConstructor
 public class AuditService {
+
     private final AuditLogRepository auditLogRepository;
     private final PatientRepository patientRepository;
 
-    public void log(User user, Patient patient, AuditAction action, String details) {
+    public void log(
+            User user,
+            Patient patient,
+            AuditAction action,
+            String details) {
+
         AuditLog log = new AuditLog();
+
         log.setUser(user);
         log.setPatient(patient);
         log.setAction(action);
         log.setDetails(details);
         log.setCreatedAt(Instant.now());
+
         auditLogRepository.save(log);
     }
 
+    /*
+     * --------------------------------
+     * Patient activity
+     * --------------------------------
+     */
+
     @Transactional(readOnly = true)
-public List<AuditActivityDto> getPatientActivity(User user) {
+    public List<AuditActivityDto> getPatientActivity(User user) {
 
-    Patient patient = patientRepository
-            .findByUserId(user.getId())
-            .orElseThrow(() ->
-                    new IllegalStateException("Patient profile not found"));
+        Patient patient = patientRepository
+                .findByUserId(user.getId())
+                .orElseThrow(() ->
+                        new IllegalStateException(
+                                "Patient profile not found"));
 
-    return auditLogRepository
-            .findTop20ByPatientIdOrderByCreatedAtDesc(patient.getId())
-            .stream()
-            .filter(this::isPatientMedicalActivity)
-            .limit(20)
-            .map(audit -> new AuditActivityDto(
-                    audit.getId(),
-                    audit.getAction().name(),
-                    audit.getDetails(),
-                    audit.getCreatedAt()
-            ))
-            .toList();
-}
+        return auditLogRepository
+                .findTop20ByPatientIdOrderByCreatedAtDesc(
+                        patient.getId())
+                .stream()
+                .filter(this::isPatientMedicalActivity)
+                .limit(20)
+                .map(audit -> new AuditActivityDto(
+                        audit.getId(),
+                        audit.getAction().name(),
+                        audit.getDetails(),
+                        audit.getCreatedAt()
+                ))
+                .toList();
+    }
 
-private boolean isPatientMedicalActivity(AuditLog audit) {
+    /*
+     * --------------------------------
+     * Doctor activity
+     * --------------------------------
+     */
 
-    return switch (audit.getAction()) {
+    @Transactional(readOnly = true)
+    public List<AuditActivityDto> getDoctorActivity(User user) {
 
-        case RECORD_READ,
-             RECORD_CREATED,
-             RECORD_UPDATED,
-             CONSENT_REQUESTED,
-             CONSENT_APPROVED,
-             CONSENT_DENIED,
-             QR_VALIDATED,
-             EMERGENCY_CRITICAL_INFO_READ -> true;
+        return auditLogRepository
+                .findTop20ByUserIdOrderByCreatedAtDesc(
+                        user.getId())
+                .stream()
+                .filter(this::isDoctorActivity)
+                .limit(20)
+                .map(audit -> new AuditActivityDto(
+                        audit.getId(),
+                        audit.getAction().name(),
+                        audit.getDetails(),
+                        audit.getCreatedAt()
+                ))
+                .toList();
+    }
 
-        default -> false;
-    };
-}
+    /*
+     * --------------------------------
+     * Patient activity filter
+     * --------------------------------
+     */
+
+    private boolean isPatientMedicalActivity(
+            AuditLog audit) {
+
+        return switch (audit.getAction()) {
+
+            case RECORD_READ,
+                 RECORD_CREATED,
+                 RECORD_UPDATED,
+                 CONSENT_REQUESTED,
+                 CONSENT_APPROVED,
+                 CONSENT_DENIED,
+                 QR_VALIDATED,
+                 EMERGENCY_CRITICAL_INFO_READ -> true;
+
+            default -> false;
+        };
+    }
+
+    /*
+     * --------------------------------
+     * Doctor activity filter
+     * --------------------------------
+     */
+
+    private boolean isDoctorActivity(
+            AuditLog audit) {
+
+        return switch (audit.getAction()) {
+
+            case RECORD_READ,
+                 RECORD_CREATED,
+                 RECORD_UPDATED,
+                 CONSENT_REQUESTED,
+                 CONSENT_APPROVED,
+                 CONSENT_DENIED,
+                 QR_VALIDATED,
+                 EMERGENCY_CRITICAL_INFO_READ -> true;
+
+            default -> false;
+        };
+    }
 }

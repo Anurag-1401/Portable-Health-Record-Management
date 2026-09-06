@@ -27,6 +27,9 @@ export const authApi = {
       phoneNumber,
       otp
     ),
+
+    getHospitalsByPincode: (pincode) =>
+  apiClient.getHospitalsByPincode(pincode),
 }
 
 export const profileApi = {
@@ -36,4 +39,7 @@ export const profileApi = {
 
   updateMyProfile: (data) =>
     apiClient.updateMyProfile(data),
+
+  getAvailableDoctors: () =>
+    apiClient.getAvailableDoctors(),
 }

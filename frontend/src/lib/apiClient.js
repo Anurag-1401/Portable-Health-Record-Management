@@ -232,6 +232,14 @@ verifyRegistration: (phoneNumber, otp) =>
   verifyOtp: (phoneNumber, otp) =>
     request('/auth/otp/verify', { method: 'POST', body: { phoneNumber, otp } }),
 
+  getHospitalsByPincode: (pincode) =>
+  request(
+    `/hospitals/search?pincode=${encodeURIComponent(pincode)}`
+  ),
+
+  getAvailableDoctors: () =>
+  request('/doctors/available'),
+  
   // Records (see FHIR resource endpoints — wire these up in Request Set B item 7)
    // Patient
 
@@ -252,6 +260,9 @@ updateMyProfile: (data) =>
 
   getRecentActivity: () =>
   request('/audit/me'),
+
+  getDoctorActivity: () =>
+  request('/audit/doctor/me'),
 
   getPatientRecords: (patientId) =>
     request(
@@ -299,6 +310,12 @@ denyConsent: (consentId) =>
   request(`/consent/${consentId}/deny`, {
     method: 'POST',
   }),
+
+  getDoctorPendingConsentRequests: () =>
+  request('/consent/doctor/pending'),
+
+  getDoctorApprovedPatients: () =>
+  request('/consent/doctor/approved-patients'),
 
   // Sync — called by src/lib/syncQueue.js, not directly by feature code
   syncRecordWrite: (queueEntry) => request('/sync/record', { method: 'POST', body: queueEntry }),

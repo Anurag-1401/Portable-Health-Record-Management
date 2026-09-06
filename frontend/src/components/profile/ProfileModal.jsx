@@ -4,7 +4,7 @@ import { Button } from '../ui/Button'
 
 export function ProfileModal({ isOpen, onClose, onProfileUpdated }) {
   const [profile, setProfile] = useState(null)
-  const [hospitals,setHospitals] = useState([])
+  const [doctors, setDoctors] = useState([])
   const [form, setForm] = useState({})
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -22,6 +22,22 @@ export function ProfileModal({ isOpen, onClose, onProfileUpdated }) {
 
     try {
       const data = await profileApi.getMyProfile()
+
+      if (data.role === 'patient') {
+  try {
+    const doctorList =
+      await profileApi.getAvailableDoctors()
+
+    setDoctors(
+      Array.isArray(doctorList)
+        ? doctorList
+        : []
+    )
+  } catch (err) {
+    console.error('Failed to load doctors:', err)
+    setDoctors([])
+  }
+}
 
       setProfile(data)
 
@@ -358,6 +374,42 @@ export function ProfileModal({ isOpen, onClose, onProfileUpdated }) {
                       </select>
                     </div>
 
+                    <div>
+  <label className="text-sm font-medium text-neutral-700">
+    Primary Doctor
+  </label>
+
+  <select
+    value={form.primaryDoctorId}
+    onChange={(e) =>
+      setForm({
+        ...form,
+        primaryDoctorId: e.target.value,
+      })
+    }
+    className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
+  >
+    <option value="">
+      No primary doctor
+    </option>
+
+    {doctors.map((doctor) => (
+      <option
+        key={doctor.id}
+        value={doctor.id}
+      >
+        {doctor.displayName}
+        {doctor.specialization
+          ? ` — ${doctor.specialization}`
+          : ''}
+        {doctor.hospitalName
+          ? ` — ${doctor.hospitalName}`
+          : ''}
+      </option>
+    ))}
+  </select>
+</div>
+
 
                     {/* Allergies */}
                     <ArrayEditor
@@ -464,30 +516,6 @@ export function ProfileModal({ isOpen, onClose, onProfileUpdated }) {
                         className="mt-1 w-full rounded-lg border border-neutral-200 bg-neutral-100 px-3 py-2 text-sm text-neutral-500"
                       />
                     </div>
-
-                    <select
-                      value={form.hospitalId}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          hospitalId: e.target.value,
-                        })
-                      }
-                    >
-                      <option value="">
-                        No hospital
-                      </option>
-                
-                      {hospitals.map((hospital) => (
-                        <option
-                          key={hospital.id}
-                          value={hospital.id}
-                        >
-                          {hospital.name}
-                        </option>
-                      ))}
-                    </select>
-
 
                     {/* Hospital details */}
                     {profile.hospitalName && (

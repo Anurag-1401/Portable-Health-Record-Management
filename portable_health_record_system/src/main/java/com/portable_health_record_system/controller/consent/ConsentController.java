@@ -50,4 +50,15 @@ public ConsentResponse getConsentStatus(
 ) {
     return consentService.getConsentStatus(patientId);
 }
+@PreAuthorize("hasRole('DOCTOR')")
+@GetMapping("/doctor/pending")
+public List<ConsentResponse> pendingRequestsForDoctor() {
+    return consentService.getPendingRequestsForCurrentDoctor();
+}
+
+@PreAuthorize("hasRole('DOCTOR')")
+@GetMapping("/doctor/approved-patients")
+public List<ConsentResponse> approvedPatientsForDoctor() {
+    return consentService.getApprovedPatientsForCurrentDoctor();
+}
 }

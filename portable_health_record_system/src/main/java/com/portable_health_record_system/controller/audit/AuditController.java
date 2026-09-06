@@ -12,20 +12,15 @@ import com.portable_health_record_system.entity.auth.User;
 import com.portable_health_record_system.security.CurrentUserService;
 import com.portable_health_record_system.service.auth.AuditService;
 
+import lombok.RequiredArgsConstructor;
+
 @RestController
+@RequiredArgsConstructor
 @RequestMapping("/api/audit")
 public class AuditController {
 
     private final AuditService auditService;
     private final CurrentUserService currentUserService;
-
-    public AuditController(
-            AuditService auditService,
-            CurrentUserService currentUserService) {
-
-        this.auditService = auditService;
-        this.currentUserService = currentUserService;
-    }
 
     @PreAuthorize("hasRole('PATIENT')")
     @GetMapping("/me")
@@ -34,5 +29,14 @@ public class AuditController {
         User user = currentUserService.requireUser();
 
         return auditService.getPatientActivity(user);
+    }
+
+    @PreAuthorize("hasRole('DOCTOR')")
+    @GetMapping("/doctor/me")
+    public List<AuditActivityDto> getDoctorActivity() {
+
+        User user = currentUserService.requireUser();
+
+        return auditService.getDoctorActivity(user);
     }
 }

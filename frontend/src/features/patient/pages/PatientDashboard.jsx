@@ -22,9 +22,11 @@ const [consentError, setConsentError] = useState(null)
 const [processingConsentId, setProcessingConsentId] = useState(null)
 
   const [profileForm, setProfileForm] = useState({
-    displayName: '',
-    bloodGroup: '',
-  })
+  displayName: '',
+  bloodGroup: '',
+  allergies: [],
+  chronicConditions: [],
+})
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(true)
   const [isLoadingRecords, setIsLoadingRecords] = useState(true)
@@ -53,14 +55,22 @@ const [processingConsentId, setProcessingConsentId] = useState(null)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
 
-  useEffect(() => {
-    if (!profile) return
+ useEffect(() => {
+  if (!profile) return
 
-    setProfileForm({
-      displayName: profile.displayName ?? '',
-      bloodGroup: profile.bloodGroup ?? '',
-    })
-  }, [profile])
+  setProfileForm({
+    displayName: profile.displayName ?? '',
+    bloodGroup: profile.bloodGroup ?? '',
+    allergies: Array.isArray(profile.allergies)
+      ? profile.allergies
+      : [],
+    chronicConditions: Array.isArray(
+      profile.chronicConditions
+    )
+      ? profile.chronicConditions
+      : [],
+  })
+}, [profile])
 
 
   const loadProfile = useCallback(async () => {
@@ -599,105 +609,173 @@ const handleDenyConsent = async (consentId) => {
       ) : (
         <div className="mt-5 flex flex-col gap-4">
 
-          <div>
-            <label className="text-sm font-medium text-neutral-700">
-              Full name
-            </label>
+  {/* Full name */}
 
-            <input
-              type="text"
-              value={profileForm.displayName}
-              disabled={!isEditingProfile}
-              onChange={(e) =>
-                setProfileForm({
-                  ...profileForm,
-                  displayName: e.target.value,
-                })
-              }
-              className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2"
-            />
-          </div>
+  <div>
+    <label className="text-sm font-medium text-neutral-700">
+      Full name
+    </label>
 
-          <div>
-            <label className="text-sm font-medium text-neutral-700">
-              Health ID
-            </label>
+    <input
+      type="text"
+      value={profileForm.displayName}
+      disabled={!isEditingProfile}
+      onChange={(e) =>
+        setProfileForm({
+          ...profileForm,
+          displayName: e.target.value,
+        })
+      }
+      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2"
+    />
+  </div>
 
-            <input
-              type="text"
-              value={healthId}
-              disabled
-              className="mt-1 w-full rounded-lg border border-neutral-200 bg-neutral-100 px-3 py-2"
-            />
-          </div>
+  {/* Health ID */}
 
-          <div>
-            <label className="text-sm font-medium text-neutral-700">
-              Phone number
-            </label>
+  <div>
+    <label className="text-sm font-medium text-neutral-700">
+      Health ID
+    </label>
 
-            <input
-              type="tel"
-              value={profile?.phoneNumber ?? ''}
-              disabled
-              className="mt-1 w-full rounded-lg border border-neutral-200 bg-neutral-100 px-3 py-2"
-            />
-          </div>
+    <input
+      type="text"
+      value={healthId}
+      disabled
+      className="mt-1 w-full rounded-lg border border-neutral-200 bg-neutral-100 px-3 py-2"
+    />
+  </div>
 
-          <div>
-            <label className="text-sm font-medium text-neutral-700">
-              Blood group
-            </label>
+  {/* Phone */}
 
-            <select
-              value={profileForm.bloodGroup}
-              disabled={!isEditingProfile}
-              onChange={(e) =>
-                setProfileForm({
-                  ...profileForm,
-                  bloodGroup: e.target.value,
-                })
-              }
-              className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2"
-            >
-              <option value="">Select blood group</option>
-              <option value="A+">A+</option>
-              <option value="A-">A-</option>
-              <option value="B+">B+</option>
-              <option value="B-">B-</option>
-              <option value="AB+">AB+</option>
-              <option value="AB-">AB-</option>
-              <option value="O+">O+</option>
-              <option value="O-">O-</option>
-            </select>
-          </div>
+  <div>
+    <label className="text-sm font-medium text-neutral-700">
+      Phone number
+    </label>
 
-          {isEditingProfile && (
-            <div className="flex gap-2 pt-2">
+    <input
+      type="tel"
+      value={profile?.phoneNumber ?? ''}
+      disabled
+      className="mt-1 w-full rounded-lg border border-neutral-200 bg-neutral-100 px-3 py-2"
+    />
+  </div>
 
-              <Button
-                type="button"
-                onClick={handleSaveProfile}
-                disabled={isSavingProfile}
-              >
-                {isSavingProfile
-                  ? 'Saving...'
-                  : 'Save Changes'}
-              </Button>
+  {/* Blood group */}
 
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleCancelEdit}
-                disabled={isSavingProfile}
-              >
-                Cancel
-              </Button>
+  <div>
+    <label className="text-sm font-medium text-neutral-700">
+      Blood group
+    </label>
 
-            </div>
-          )}
+    <select
+      value={profileForm.bloodGroup}
+      disabled={!isEditingProfile}
+      onChange={(e) =>
+        setProfileForm({
+          ...profileForm,
+          bloodGroup: e.target.value,
+        })
+      }
+      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2"
+    >
+      <option value="">Select blood group</option>
+      <option value="A+">A+</option>
+      <option value="A-">A-</option>
+      <option value="B+">B+</option>
+      <option value="B-">B-</option>
+      <option value="AB+">AB+</option>
+      <option value="AB-">AB-</option>
+      <option value="O+">O+</option>
+      <option value="O-">O-</option>
+    </select>
+  </div>
 
-        </div>
+  {/* Allergies */}
+
+  <div>
+    <label className="text-sm font-medium text-neutral-700">
+      Allergies
+    </label>
+
+    <input
+      type="text"
+      value={profileForm.allergies.join(', ')}
+      disabled={!isEditingProfile}
+      onChange={(e) =>
+        setProfileForm({
+          ...profileForm,
+          allergies: e.target.value
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean),
+        })
+      }
+      placeholder="e.g. Penicillin, Peanuts"
+      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2"
+    />
+
+    <p className="mt-1 text-xs text-neutral-500">
+      Enter multiple allergies separated by commas.
+    </p>
+  </div>
+
+  {/* Chronic conditions */}
+
+  <div>
+    <label className="text-sm font-medium text-neutral-700">
+      Chronic Conditions
+    </label>
+
+    <input
+      type="text"
+      value={profileForm.chronicConditions.join(', ')}
+      disabled={!isEditingProfile}
+      onChange={(e) =>
+        setProfileForm({
+          ...profileForm,
+          chronicConditions: e.target.value
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean),
+        })
+      }
+      placeholder="e.g. Asthma, Diabetes"
+      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2"
+    />
+
+    <p className="mt-1 text-xs text-neutral-500">
+      Enter multiple conditions separated by commas.
+    </p>
+  </div>
+
+  {/* Buttons */}
+
+  {isEditingProfile && (
+    <div className="flex gap-2 pt-2">
+
+      <Button
+        type="button"
+        onClick={handleSaveProfile}
+        disabled={isSavingProfile}
+      >
+        {isSavingProfile
+          ? 'Saving...'
+          : 'Save Changes'}
+      </Button>
+
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={handleCancelEdit}
+        disabled={isSavingProfile}
+      >
+        Cancel
+      </Button>
+
+    </div>
+  )}
+
+</div>
       )}
     </Card>
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { AppShell } from '../../../components/layout/AppShell'
@@ -8,22 +8,103 @@ import { Badge } from '../../../components/ui/Badge'
 
 import { useAuth } from '../../../hooks/useAuth'
 import { apiClient } from '../../../lib/apiClient'
+import { STORES, openDb } from '../../../lib/offlineDb'
 
 export default function DoctorDashboard() {
   const navigate = useNavigate()
   const { session } = useAuth()
 
-  const [recentPatients, setRecentPatients] = useState([])
+  const [pendingRequests, setPendingRequests] = useState([])
   const [activity, setActivity] = useState([])
+  const [approvedPatients, setApprovedPatients] = useState([])
+
+  const [syncStats, setSyncStats] = useState({
+    localOnly: 0,
+    synced: 0,
+    conflict: 0,
+    total: 0,
+  })
+
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  )
+
   const [isLoading, setIsLoading] = useState(false)
+  const [syncLoading, setSyncLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  /*
-   * Load dashboard information.
-   *
-   * The dashboard should not contain hard-coded patient data.
-   * Patient information should come from the backend.
-   */
+  /* -------------------------------- */
+  /* Network status */
+  /* -------------------------------- */
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  /* -------------------------------- */
+  /* Load sync queue */
+  /* -------------------------------- */
+
+  const loadSyncStats = useCallback(async () => {
+    try {
+      const db = await openDb()
+
+      if (!db.objectStoreNames.contains(STORES.syncQueue)) {
+        db.close()
+        return
+      }
+
+      const tx = db.transaction(STORES.syncQueue, 'readonly')
+      const store = tx.objectStore(STORES.syncQueue)
+
+      const request = store.getAll()
+
+      request.onsuccess = () => {
+        const entries = request.result ?? []
+
+        const localOnly = entries.filter(
+          (entry) => entry.status === 'local_only'
+        ).length
+
+        const synced = entries.filter(
+          (entry) => entry.status === 'synced'
+        ).length
+
+        const conflict = entries.filter(
+          (entry) => entry.status === 'conflict'
+        ).length
+
+        setSyncStats({
+          localOnly,
+          synced,
+          conflict,
+          total: entries.length,
+        })
+
+        db.close()
+      }
+
+      request.onerror = () => {
+        db.close()
+      }
+    } catch (err) {
+      console.error('Failed to load sync queue:', err)
+    }
+  }, [])
+
+  /* -------------------------------- */
+  /* Load dashboard data */
+  /* -------------------------------- */
+
   const loadDashboard = useCallback(async () => {
     if (!session?.userId) return
 
@@ -31,33 +112,92 @@ export default function DoctorDashboard() {
       setIsLoading(true)
       setError(null)
 
-      /*
-       * These endpoints can be wired to the corresponding
-       * backend APIs when they are available.
-       *
-       * For now we safely attempt them only if they exist
-       * in apiClient.
-       */
+      const [consentsResult, approvedPatientsResult, activityResult] =
+        await Promise.allSettled([
+          apiClient.getDoctorPendingConsentRequests(),
+          apiClient.getDoctorApprovedPatients(),
+          apiClient.getDoctorActivity(),
+        ])
 
-      if (typeof apiClient.getDoctorRecentPatients === 'function') {
-        const patients =
-          await apiClient.getDoctorRecentPatients()
+      /* ------------------------------ */
+      /* Pending consent requests */
+      /* ------------------------------ */
 
-        setRecentPatients(
-          Array.isArray(patients)
-            ? patients
-            : patients?.patients ?? []
+      if (consentsResult.status === 'fulfilled') {
+        const data = consentsResult.value
+
+        setPendingRequests(
+          Array.isArray(data)
+            ? data
+            : data?.requests ??
+                data?.consents ??
+                []
+        )
+      } else {
+        console.error(
+          'Failed to load pending consent requests:',
+          consentsResult.reason
         )
       }
 
-      if (typeof apiClient.getDoctorActivity === 'function') {
-        const activities =
-          await apiClient.getDoctorActivity()
+      if (approvedPatientsResult.status === 'fulfilled') {
+  const data = approvedPatientsResult.value
+
+  console.log(
+    'APPROVED PATIENTS:',
+    data
+  )
+
+  setApprovedPatients(
+    Array.isArray(data)
+      ? data
+      : data?.patients ??
+          data?.consents ??
+          []
+  )
+} else {
+  console.error(
+    'Failed to load approved patients:',
+    approvedPatientsResult.reason
+  )
+}
+
+      /* ------------------------------ */
+      /* Recent activity */
+      /* ------------------------------ */
+
+      if (activityResult.status === 'fulfilled') {
+        const data = activityResult.value
 
         setActivity(
-          Array.isArray(activities)
-            ? activities
-            : activities?.activities ?? []
+          Array.isArray(data)
+            ? data
+            : data?.activities ??
+                data?.content ??
+                []
+        )
+      } else {
+        console.error(
+          'Failed to load recent activity:',
+          activityResult.reason
+        )
+      }
+
+      await loadSyncStats()
+
+      /*
+       * If both backend requests failed, show an error.
+       * This prevents a partially loaded dashboard from
+       * looking like there is simply no data.
+       */
+      if (
+        consentsResult.status === 'rejected' &&
+        activityResult.status === 'rejected'
+      ) {
+        throw (
+          consentsResult.reason ??
+          activityResult.reason ??
+          new Error('Failed to load dashboard')
         )
       }
     } catch (err) {
@@ -66,15 +206,216 @@ export default function DoctorDashboard() {
         err
       )
 
-      setError(err.message)
+      setError(
+        err?.message ??
+          'Failed to load dashboard information.'
+      )
     } finally {
       setIsLoading(false)
     }
-  }, [session?.userId])
+  }, [session?.userId, loadSyncStats])
 
   useEffect(() => {
     loadDashboard()
   }, [loadDashboard])
+
+  /* -------------------------------- */
+  /* Refresh sync state periodically */
+  /* -------------------------------- */
+
+  useEffect(() => {
+    loadSyncStats()
+
+    const interval = window.setInterval(
+      loadSyncStats,
+      5000
+    )
+
+    return () => window.clearInterval(interval)
+  }, [loadSyncStats])
+
+  /* -------------------------------- */
+  /* Recently accessed patients */
+  /* -------------------------------- */
+
+  const recentPatients = useMemo(() => {
+    const patients = new Map()
+
+    for (const item of activity) {
+      /*
+       * Different backend DTO versions may use different
+       * field names. Support the common variants without
+       * creating fake patient data.
+       */
+
+      const patientId =
+        item.patientId ??
+        item.patient_id ??
+        item.targetPatientId ??
+        item.target_patient_id
+
+      const healthId =
+        item.healthId ??
+        item.health_id ??
+        item.patientHealthId ??
+        item.patient_health_id
+
+      const displayName =
+        item.patientName ??
+        item.patient_name ??
+        item.patientDisplayName ??
+        item.patient_display_name
+
+      /*
+       * Only consider activities that actually identify
+       * a patient.
+       */
+      if (!patientId && !healthId) {
+        continue
+      }
+
+      const key = patientId ?? healthId
+
+      if (!patients.has(key)) {
+        patients.set(key, {
+          patientId,
+          healthId,
+          displayName,
+          createdAt:
+            item.createdAt ??
+            item.created_at ??
+            null,
+        })
+      }
+    }
+
+    return Array.from(patients.values())
+      .sort((a, b) => {
+        const aTime = a.createdAt
+          ? new Date(a.createdAt).getTime()
+          : 0
+
+        const bTime = b.createdAt
+          ? new Date(b.createdAt).getTime()
+          : 0
+
+        return bTime - aTime
+      })
+  }, [activity])
+
+  /* -------------------------------- */
+  /* Sync state */
+  /* -------------------------------- */
+
+  const syncStatus = useMemo(() => {
+    if (!isOnline) {
+      return {
+        label: 'Offline',
+        tone: 'neutral',
+        description:
+          syncStats.localOnly > 0
+            ? `${syncStats.localOnly} change${
+                syncStats.localOnly === 1
+                  ? ''
+                  : 's'
+              } waiting for connection.`
+            : 'Changes will be queued locally until connectivity returns.',
+      }
+    }
+
+    if (syncStats.conflict > 0) {
+      return {
+        label: 'Conflict',
+        tone: 'emergency',
+        description: `${syncStats.conflict} change${
+          syncStats.conflict === 1
+            ? ''
+            : 's'
+        } require manual review.`,
+      }
+    }
+
+    if (syncStats.localOnly > 0) {
+      return {
+        label: 'Pending',
+        tone: 'trust',
+        description: `${syncStats.localOnly} local change${
+          syncStats.localOnly === 1
+            ? ''
+            : 's'
+        } waiting to sync.`,
+      }
+    }
+
+    return {
+      label: 'Synced',
+      tone: 'trust',
+      description:
+        syncStats.synced > 0
+          ? `${syncStats.synced} queued change${
+              syncStats.synced === 1
+                ? ''
+                : 's'
+            } have been synchronized.`
+          : 'No local changes are waiting to be synchronized.',
+    }
+  }, [isOnline, syncStats])
+
+  /* -------------------------------- */
+  /* Manual sync */
+  /* -------------------------------- */
+
+  const handleSync = async () => {
+    if (!isOnline || syncLoading) return
+
+    try {
+      setSyncLoading(true)
+      setError(null)
+
+      const { processSyncQueue } =
+        await import('../../../lib/syncQueue')
+
+      await processSyncQueue(apiClient)
+
+      await loadSyncStats()
+    } catch (err) {
+      console.error('Sync failed:', err)
+
+      setError(
+        err?.message ??
+          'Unable to synchronize local changes.'
+      )
+
+      await loadSyncStats()
+    } finally {
+      setSyncLoading(false)
+    }
+  }
+
+  /* -------------------------------- */
+  /* Activity formatting */
+  /* -------------------------------- */
+
+  const getActivityDescription = (item) => {
+    return (
+      item.description ??
+      item.details ??
+      formatAction(
+        item.action ??
+          item.eventType ??
+          item.event_type
+      )
+    )
+  }
+
+  const getActivityDate = (item) => {
+    return (
+      item.createdAt ??
+      item.created_at ??
+      item.timestamp ??
+      null
+    )
+  }
 
   return (
     <AppShell>
@@ -85,9 +426,21 @@ export default function DoctorDashboard() {
         {/* -------------------------------- */}
 
         <div>
-          <h1 className="text-2xl font-semibold text-neutral-900">
-            Doctor Dashboard
-          </h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-semibold text-neutral-900">
+              Doctor Dashboard
+            </h1>
+
+            <Badge
+              tone={
+                isOnline
+                  ? 'trust'
+                  : 'neutral'
+              }
+            >
+              {isOnline ? 'Online' : 'Offline'}
+            </Badge>
+          </div>
 
           <p className="mt-1 text-sm text-neutral-500">
             Manage patient access and review authorized
@@ -146,7 +499,9 @@ export default function DoctorDashboard() {
 
               <Button
                 type="button"
-                onClick={() => navigate('/doctor/scan')}
+                onClick={() =>
+                  navigate('/doctor/scan')
+                }
               >
                 Scan Health ID
               </Button>
@@ -170,7 +525,9 @@ export default function DoctorDashboard() {
 
               <Button
                 type="button"
-                onClick={() => navigate('/doctor/patients/search')}
+                onClick={() =>
+                  navigate('/doctor/patients/search')
+                }
               >
                 Search Patient
               </Button>
@@ -186,13 +543,17 @@ export default function DoctorDashboard() {
 
         <div className="grid gap-4 lg:grid-cols-3">
 
+          {/* Pending requests */}
+
           <Card>
             <h2 className="text-sm font-semibold text-neutral-700">
               Pending Requests
             </h2>
 
             <p className="mt-2 text-3xl font-semibold text-neutral-900">
-              —
+              {isLoading
+                ? '...'
+                : pendingRequests.length}
             </p>
 
             <p className="mt-1 text-sm text-neutral-500">
@@ -210,29 +571,39 @@ export default function DoctorDashboard() {
             </Button>
           </Card>
 
+          {/* Authorized patients */}
+
           <Card>
-            <h2 className="text-sm font-semibold text-neutral-700">
-              Authorized Patients
-            </h2>
 
-            <p className="mt-2 text-3xl font-semibold text-neutral-900">
-              {recentPatients.length}
+    <div>
+      <h2 className="font-semibold text-neutral-900">
+        Authorized Patients
+      </h2>
+
+       <p className="mt-2 text-3xl font-semibold text-neutral-900">
+              {isLoading
+                ? '...'
+                : approvedPatients.length}
             </p>
 
-            <p className="mt-1 text-sm text-neutral-500">
-              Patients you've recently accessed.
-            </p>
+      <p className="mt-1 text-sm text-neutral-500">
+        Patients with approved consent.
+      </p>
+    </div>
 
-            <Button
-              type="button"
-              className="mt-4"
-              onClick={() =>
-                navigate('/doctor/patients')
-              }
-            >
-              View patients
-            </Button>
-          </Card>
+    <Button
+      type="button"
+      className="mt-4"
+      onClick={() =>
+        navigate('/doctor/patients')
+      }
+    >
+      View all
+    </Button>
+
+</Card>
+
+          {/* Sync status */}
 
           <Card>
             <h2 className="text-sm font-semibold text-neutral-700">
@@ -240,25 +611,38 @@ export default function DoctorDashboard() {
             </h2>
 
             <div className="mt-3">
-              <Badge tone="trust">
-                Ready
+              <Badge tone={syncStatus.tone}>
+                {syncStatus.label}
               </Badge>
             </div>
 
             <p className="mt-2 text-sm text-neutral-500">
-              Local records can be synchronized when
-              connectivity is available.
+              {syncStatus.description}
             </p>
 
-            <Button
-              type="button"
-              className="mt-4"
-              onClick={() =>
-                navigate('/doctor/sync')
-              }
-            >
-              View sync queue
-            </Button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() =>
+                  navigate('/doctor/sync')
+                }
+              >
+                View sync queue
+              </Button>
+
+              {isOnline &&
+                syncStats.localOnly > 0 && (
+                  <Button
+                    type="button"
+                    onClick={handleSync}
+                    disabled={syncLoading}
+                  >
+                    {syncLoading
+                      ? 'Syncing...'
+                      : 'Sync now'}
+                  </Button>
+                )}
+            </div>
           </Card>
 
         </div>
@@ -277,8 +661,8 @@ export default function DoctorDashboard() {
               </h2>
 
               <p className="mt-1 text-sm text-neutral-500">
-                Patients whose records you recently accessed
-                with appropriate authorization.
+                Patients identified from your recent
+                authorized activity.
               </p>
             </div>
 
@@ -305,7 +689,8 @@ export default function DoctorDashboard() {
               </p>
 
               <p className="mt-1 text-sm text-neutral-500">
-                Scan a patient's Health ID to begin.
+                Scan or search for a patient's Health ID
+                to begin.
               </p>
 
               <Button
@@ -322,44 +707,70 @@ export default function DoctorDashboard() {
           ) : (
             <div className="divide-y divide-neutral-200">
 
-              {recentPatients.slice(0, 5).map((patient) => (
-                <div
-                  key={
-                    patient.patientId ??
-                    patient.id
-                  }
-                  className="flex items-center justify-between gap-4 py-4"
-                >
+              {recentPatients
+                .slice(0, 5)
+                .map((patient) => {
 
-                  <div>
-                    <p className="text-sm font-medium text-neutral-800">
-                      {patient.displayName ??
-                        'Patient'}
-                    </p>
+                  const patientId =
+                    patient.patientId
 
-                    <p className="mt-1 text-xs text-neutral-500">
-                      Health ID:{' '}
-                      {patient.healthId ??
-                        'Unavailable'}
-                    </p>
-                  </div>
+                  return (
+                    <div
+                      key={
+                        patientId ??
+                        patient.healthId
+                      }
+                      className="flex items-center justify-between gap-4 py-4"
+                    >
 
-                  <Button
-                    type="button"
-                    onClick={() =>
-                      navigate(
-                        `/doctor/patients/${
-                          patient.patientId ??
-                          patient.id
-                        }`
-                      )
-                    }
-                  >
-                    Open
-                  </Button>
+                      <div>
+                        <p className="text-sm font-medium text-neutral-800">
+                          {patient.displayName ??
+                            'Patient'}
+                        </p>
 
-                </div>
-              ))}
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Health ID:{' '}
+                          {patient.healthId ??
+                            'Unavailable'}
+                        </p>
+
+                        {patient.createdAt && (
+                          <p className="mt-1 text-xs text-neutral-400">
+                            {new Date(
+                              patient.createdAt
+                            ).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+
+                      {patientId ? (
+                        <Button
+                          type="button"
+                          onClick={() =>
+                            navigate(
+                              `/doctor/patients/${patientId}`
+                            )
+                          }
+                        >
+                          Open
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          onClick={() =>
+                            navigate(
+                              '/doctor/patients/search'
+                            )
+                          }
+                        >
+                          Search
+                        </Button>
+                      )}
+
+                    </div>
+                  )
+                })}
 
             </div>
           )}
@@ -389,41 +800,131 @@ export default function DoctorDashboard() {
               onClick={loadDashboard}
               disabled={isLoading}
             >
-              Refresh
+              {isLoading ? 'Refreshing...' : 'Refresh'}
             </Button>
 
           </div>
 
-          {activity.length === 0 ? (
+          {isLoading && activity.length === 0 ? (
+            <p className="text-sm text-neutral-500">
+              Loading activity...
+            </p>
+          ) : activity.length === 0 ? (
             <p className="text-sm text-neutral-500">
               No recent activity.
             </p>
           ) : (
             <div className="flex flex-col divide-y divide-neutral-200">
 
-              {activity.slice(0, 5).map((item) => (
-                <div
-                  key={item.id}
-                  className="py-3"
-                >
+              {activity
+                .slice(0, 5)
+                .map((item, index) => {
 
-                  <p className="text-sm font-medium text-neutral-800">
-                    {item.description ??
-                      item.details ??
-                      formatAction(item.action)}
-                  </p>
+                  const createdAt =
+                    getActivityDate(item)
 
-                  {item.createdAt && (
-                    <p className="mt-1 text-xs text-neutral-500">
-                      {new Date(
-                        item.createdAt
-                      ).toLocaleString()}
-                    </p>
-                  )}
+                  return (
+                    <div
+                      key={
+                        item.id ??
+                        item.auditId ??
+                        `${createdAt ?? 'activity'}-${index}`
+                      }
+                      className="py-3"
+                    >
 
-                </div>
-              ))}
+                      <p className="text-sm font-medium text-neutral-800">
+                        {getActivityDescription(item)}
+                      </p>
 
+                      {createdAt && (
+                        <p className="mt-1 text-xs text-neutral-500">
+                          {new Date(
+                            createdAt
+                          ).toLocaleString()}
+                        </p>
+                      )}
+
+                    </div>
+                  )
+                })}
+
+            </div>
+          )}
+
+        </Card>
+
+        {/* -------------------------------- */}
+        {/* Sync summary */}
+        {/* -------------------------------- */}
+
+        <Card>
+
+          <div className="mb-4">
+            <h2 className="font-semibold text-neutral-900">
+              Offline Sync
+            </h2>
+
+            <p className="mt-1 text-sm text-neutral-500">
+              Local changes are stored on the device and
+              synchronized when connectivity is available.
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                Waiting
+              </p>
+
+              <p className="mt-1 text-2xl font-semibold text-neutral-900">
+                {syncStats.localOnly}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                Synced
+              </p>
+
+              <p className="mt-1 text-2xl font-semibold text-neutral-900">
+                {syncStats.synced}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                Conflicts
+              </p>
+
+              <p className="mt-1 text-2xl font-semibold text-neutral-900">
+                {syncStats.conflict}
+              </p>
+            </div>
+
+          </div>
+
+          {syncStats.conflict > 0 && (
+            <div className="mt-4 rounded-lg border border-neutral-200 p-4">
+              <p className="text-sm font-medium text-neutral-800">
+                Manual review required
+              </p>
+
+              <p className="mt-1 text-sm text-neutral-500">
+                Critical-field conflicts are not automatically
+                resolved.
+              </p>
+
+              <Button
+                type="button"
+                className="mt-3"
+                onClick={() =>
+                  navigate('/doctor/sync')
+                }
+              >
+                Review sync queue
+              </Button>
             </div>
           )}
 
@@ -504,7 +1005,6 @@ export default function DoctorDashboard() {
   )
 }
 
-
 /* -------------------------------- */
 /* Workflow item */
 /* -------------------------------- */
@@ -537,13 +1037,14 @@ function WorkflowItem({
   )
 }
 
-
 /* -------------------------------- */
 /* Audit action formatting */
 /* -------------------------------- */
 
 function formatAction(action) {
-  if (!action) return 'Activity recorded'
+  if (!action) {
+    return 'Activity recorded'
+  }
 
   switch (action) {
     case 'RECORD_READ':
@@ -571,8 +1072,8 @@ function formatAction(action) {
       return 'Emergency medical information accessed'
 
     default:
-      return action
+      return String(action)
         .replaceAll('_', ' ')
         .toLowerCase()
-    }
   }
+}

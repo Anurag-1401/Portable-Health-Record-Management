@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
     List<AuditLog> findTop20ByPatientIdOrderByCreatedAtDesc(UUID patientId);
+    List<AuditLog> findTop20ByUserIdOrderByCreatedAtDesc(UUID userId);
 }
