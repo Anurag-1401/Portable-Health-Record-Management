@@ -42,4 +42,16 @@ export const profileApi = {
 
   getAvailableDoctors: () =>
     apiClient.getAvailableDoctors(),
-}
+
+  validateDoctorQR: (doctorId) =>
+  apiClient.validateDoctorQR(doctorId),
+
+  requestConsentByPatient: (doctorId, purpose) =>
+    apiClient.requestConsentByPatient(doctorId, purpose),
+
+  generatePatientQr: () =>
+  apiClient.generatePatientQr(),
+
+  revokePatientQr: () =>
+  apiClient.revokePatientQr(),
+} 

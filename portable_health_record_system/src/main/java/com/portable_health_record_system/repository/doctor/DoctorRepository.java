@@ -17,6 +17,15 @@ public interface DoctorRepository extends JpaRepository<Doctor, UUID> {
         FROM Doctor d
         JOIN FETCH d.user u
         LEFT JOIN FETCH d.hospital h
+        WHERE u.id = :userId
+    """)
+    Optional<Doctor> findByUserIdWithUserAndHospital(UUID userId);
+
+    @Query("""
+        SELECT d
+        FROM Doctor d
+        JOIN FETCH d.user u
+        LEFT JOIN FETCH d.hospital h
     """)
     List<Doctor> findAllWithUserAndHospital();
 }

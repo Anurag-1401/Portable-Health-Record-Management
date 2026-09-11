@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { DoctorQRDisplay } from '../../../components/qr/DoctorQRDisplay'
 
 import { AppShell } from '../../../components/layout/AppShell'
 import { Card } from '../../../components/ui/Card'
@@ -17,7 +18,8 @@ export default function DoctorDashboard() {
   const [pendingRequests, setPendingRequests] = useState([])
   const [activity, setActivity] = useState([])
   const [approvedPatients, setApprovedPatients] = useState([])
-
+  const [doctor, setDoctor] = useState(null)
+  const [showDoctorQR, setShowDoctorQR] = useState(false)
   const [syncStats, setSyncStats] = useState({
     localOnly: 0,
     synced: 0,
@@ -36,6 +38,19 @@ export default function DoctorDashboard() {
   /* -------------------------------- */
   /* Network status */
   /* -------------------------------- */
+
+  useEffect(() => {
+  const loadDoctor = async () => {
+    try {
+      const data = await apiClient.getCurrentDoctor()
+      setDoctor(data)
+    } catch (error) {
+      console.error('Failed to load doctor profile:', error)
+    }
+  }
+
+  loadDoctor()
+}, [])
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true)
@@ -497,14 +512,23 @@ export default function DoctorDashboard() {
                 </p>
               </div>
 
-              <Button
-                type="button"
-                onClick={() =>
-                  navigate('/doctor/scan')
-                }
-              >
-                Scan Health ID
-              </Button>
+               <div className="flex flex-col gap-2 sm:flex-row">
+      <Button
+        type="button"
+        onClick={() => navigate('/doctor/scan')}
+      >
+        Scan Patient QR
+      </Button>
+
+       <Button
+        type="button"
+        variant="secondary"
+        disabled={!doctor}
+        onClick={() => setShowDoctorQR(true)}
+      >
+        {!doctor ? 'Loading QR':'Show My QR'}
+      </Button>
+    </div>
 
             </div>
           </Card>
@@ -1001,6 +1025,14 @@ export default function DoctorDashboard() {
         </Card>
 
       </div>
+      {showDoctorQR && doctor && (
+  <DoctorQRDisplay
+    doctorId={doctor.id}
+    displayName={doctor.displayName}
+    specialization={doctor.specialization}
+    onClose={() => setShowDoctorQR(false)}
+  />
+)}
     </AppShell>
   )
 }

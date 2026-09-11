@@ -25,7 +25,7 @@ public class User extends EntityBase {
     @Column(name = "enabled", nullable = false)
     private boolean enabled = true;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
     @JoinColumn(name = "role_id", nullable = false)
     private Role role;
 }

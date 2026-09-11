@@ -127,11 +127,15 @@ public PatientProfileDto updateMyProfile(
                         )
                 );
 
-        return new PatientSearchResponse(
-                patient.getId(),
-                patient.getHealthId(),
-                patient.getUser().getDisplayName()
-        );
+       return new PatientSearchResponse(
+        patient.getId(),
+        patient.getHealthId(),
+        patient.getUser().getDisplayName(),
+        patient.getUser().getPhoneNumber(),
+        patient.getBloodGroup(),
+        patient.getAllergies(),
+        patient.getChronicConditions()
+);
     }
 
 
@@ -170,9 +174,13 @@ public PatientSearchResponse getPatientForDoctor(UUID patientId) {
     }
 
     return new PatientSearchResponse(
-            patient.getId(),
-            patient.getHealthId(),
-            patient.getUser().getDisplayName()
-    );
+        patient.getId(),
+        patient.getHealthId(),
+        patient.getUser().getDisplayName(),
+        patient.getUser().getPhoneNumber(),
+        patient.getBloodGroup(),
+        patient.getAllergies(),
+        patient.getChronicConditions()
+);
 }
 }

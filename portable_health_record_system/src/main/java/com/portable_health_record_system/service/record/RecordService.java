@@ -15,7 +15,6 @@ import com.portable_health_record_system.mapper.RecordMapper;
 import com.portable_health_record_system.repository.record.MedicalRecordRepository;
 import com.portable_health_record_system.repository.record.RecordVersionRepository;
 import com.portable_health_record_system.repository.patient.PatientRepository;
-import com.portable_health_record_system.security.CurrentUserService;
 import com.portable_health_record_system.service.auth.AuditService;
 
 import lombok.RequiredArgsConstructor;
@@ -36,34 +35,62 @@ public class RecordService {
     private final RecordVersionRepository recordVersionRepository;
     private final PatientRepository patientRepository;
     private final RecordMapper recordMapper;
-private final CurrentUserService currentUserService;
     private final HashChainService hashChainService;
     private final AuditService auditService;
     private final com.portable_health_record_system.repository.consent.ConsentRepository consentRepository;
 
-    @Transactional(readOnly = true)
-    public List<MedicalRecordDto> getPatientRecordsForUser(User user) {
 
-        Patient patient = patientRepository
-                .findByUserId(user.getId())
-                .orElseThrow(() ->
-                        new IllegalStateException(
-                                "Patient profile not found"
-                        ));
+    private MedicalRecordDto toDto(MedicalRecord record) {
 
-        return getPatientRecords(patient.getId().toString());
-    }
+    RecordVersion currentVersion = recordVersionRepository
+            .findByRecordIdAndVersionNumber(
+                    record.getId(),
+                    record.getCurrentVersion()
+            )
+            .orElseThrow(() ->
+                    new ResourceNotFoundException(
+                            "Current version not found for record "
+                                    + record.getId()
+                    ));
 
-    @Transactional
-    public List<MedicalRecordDto> getPatientRecords(String patientIdentifier) {
-        User user = currentUserService.requireUser();
-        Patient patient = resolvePatientIdentifier(patientIdentifier);
-        UUID patientId = patient.getId();
-        authorizeRead(user, patient);
-        List<RecordVersion> versions = recordVersionRepository.findByPatientIdOrderByCreatedAtAsc(patientId);
-        auditService.log(user, patient, AuditAction.RECORD_READ, "Patient record history read");
-        return versions.stream().map(recordMapper::toDto).toList();
-    }
+    return new MedicalRecordDto(
+            record.getId(),
+            record.getPatient().getId(),
+            record.getFhirResourceType().name(),
+            record.getCurrentVersion(),
+            currentVersion.getResourceData(),
+            currentVersion.getPreviousRecordHash(),
+            record.getCurrentRecordHash(),
+            record.getCreatedAt(),
+            record.getUpdatedAt()
+    );
+}
+
+   @Transactional(readOnly = true)
+public List<MedicalRecordDto> getPatientRecordsForUser(User user) {
+
+    Patient patient = patientRepository.findByUserId(user.getId())
+            .orElseThrow(() ->
+                    new ResourceNotFoundException("Patient not found"));
+
+    return medicalRecordRepository
+            .findByPatientIdAndDeletedFalseOrderByUpdatedAtDesc(patient.getId())
+            .stream()
+            .map(this::toDto)
+            .toList();
+}
+
+   @Transactional(readOnly = true)
+public List<MedicalRecordDto> getPatientRecords(String patientId) {
+
+    Patient patient = resolvePatient(patientId);
+
+    return medicalRecordRepository
+            .findByPatientIdAndDeletedFalseOrderByUpdatedAtDesc(patient.getId())
+            .stream()
+            .map(this::toDto)
+            .toList();
+}
 
     @Transactional
     public MedicalRecordDto createOrUpdate(RecordWriteRequest request, User actor)  {
@@ -115,19 +142,6 @@ private final CurrentUserService currentUserService;
         return recordMapper.toDto(version);
     }
 
-    private Patient resolvePatientIdentifier(String identifier) {
-        try {
-            UUID id = UUID.fromString(identifier);
-            return patientRepository.findById(id)
-                    .or(() -> patientRepository.findByUserId(id))
-                    .orElseGet(() -> patientRepository.findByHealthId(identifier)
-                            .orElseThrow(() -> new ResourceNotFoundException("Patient not found")));
-        } catch (IllegalArgumentException ex) {
-            return patientRepository.findByHealthId(identifier)
-                    .orElseThrow(() -> new ResourceNotFoundException("Patient not found"));
-        }
-    }
-
     private Patient resolvePatient(RecordWriteRequest request, User actor) {
         if (request.patientId() != null) {
             return patientRepository.findById(request.patientId()).orElseThrow(() -> new ResourceNotFoundException("Patient not found"));
@@ -138,38 +152,29 @@ private final CurrentUserService currentUserService;
         return patientRepository.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedBusinessException("A patient identifier is required"));
     }
 
-    private void authorizeRead(User user, Patient patient) {
-        switch (user.getRole().getName()) {
-            case admin -> { }
-            case patient -> {
-                if (!patient.getUser().getId().equals(user.getId())) throw new AccessDeniedBusinessException("Patients may only read their own records");
-            }
-            case doctor -> {
+    private Patient resolvePatient(String patientId) {
 
-    boolean approved =
-            consentRepository
-                    .findByPatientIdAndStatus(
-                            patient.getId(),
-                            ConsentStatus.APPROVED
-                    )
-                    .stream()
-                    .anyMatch(c ->
-                            c.getDoctor() != null &&
-                            c.getDoctor()
-                                    .getUser()
-                                    .getId()
-                                    .equals(user.getId())
-                    );
-
-    if (!approved) {
-        throw new AccessDeniedBusinessException(
-                "Doctor access requires approved patient consent"
-        );
+    if (patientId == null || patientId.isBlank()) {
+        throw new ResourceNotFoundException("Patient identifier is required");
     }
+
+    // First try UUID patient ID
+    try {
+        UUID patientUuid = UUID.fromString(patientId);
+
+        return patientRepository.findById(patientUuid)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Patient not found"));
+
+    } catch (IllegalArgumentException ignored) {
+        // Not a UUID, so try health ID
+    }
+
+    // Otherwise treat it as Health ID
+    return patientRepository.findByHealthId(patientId)
+            .orElseThrow(() ->
+                    new ResourceNotFoundException("Patient not found"));
 }
-            default -> throw new AccessDeniedBusinessException("This role cannot access full medical history");
-        }
-    }
 
     private void authorizeWrite(User user, Patient patient) {
         switch (user.getRole().getName()) {

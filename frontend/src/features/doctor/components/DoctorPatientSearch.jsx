@@ -16,7 +16,7 @@ export default function DoctorPatientSearch() {
   const [healthId, setHealthId] = useState('')
   const [patient, setPatient] = useState(null)
 
-  /*
+  /* 
    * IMPORTANT:
    * consent is always loaded from the backend.
    * Do NOT store consent status in sessionStorage.
@@ -365,8 +365,14 @@ export default function DoctorPatientSearch() {
   const consentStatus =
     consent?.status?.toUpperCase() ?? null
 
+    const consentExpired =
+  consent?.expiresAt &&
+  new Date(consent.expiresAt).getTime() <= Date.now()
+
+
   const isApproved =
-    consentStatus === 'APPROVED'
+  consentStatus === 'APPROVED' &&
+  !consentExpired
 
   const isPending =
     consentStatus === 'PENDING'
@@ -375,7 +381,11 @@ export default function DoctorPatientSearch() {
     consentStatus === 'DENIED'
 
   const isExpired =
-    consentStatus === 'EXPIRED'
+  consentStatus === 'EXPIRED' ||
+  (
+    consentStatus === 'APPROVED' &&
+    consentExpired
+  )
 
   const patientId =
     patient?.patientId ??
@@ -851,28 +861,20 @@ export default function DoctorPatientSearch() {
                 {/* Approved */}
 
                 <Button
-                  type="button"
-                  disabled={
-                    !isApproved ||
-                    isLoadingConsent
-                  }
-                  onClick={() => {
+  type="button"
+  disabled={!isApproved || isLoadingConsent}
+  onClick={() => {
+    if (!isApproved) {
+      return
+    }
 
-                    if (!isApproved) {
-                      return
-                    }
-
-                    navigate(
-                      `/doctor/patients/${patientId}`
-                    )
-                  }}
-                >
-                  {isLoadingConsent
-                    ? 'Checking Access...'
-                    : isApproved
-                      ? 'Open Patient'
-                      : 'Open Patient'}
-                </Button>
+    navigate(`/doctor/patients/${patientId}`)
+  }}
+>
+  {isLoadingConsent
+    ? 'Checking Access...'
+    : 'Open Patient'}
+</Button>
 
               </div>
 

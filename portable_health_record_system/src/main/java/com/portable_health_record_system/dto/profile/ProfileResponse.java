@@ -12,6 +12,7 @@ public record ProfileResponse(
 
         // Patient fields
         String healthId,
+        String qrCodePayloadHash,
         String bloodGroup,
         List<Object> allergies,
         List<Object> chronicConditions,

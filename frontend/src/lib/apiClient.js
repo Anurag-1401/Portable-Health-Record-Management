@@ -1,32 +1,51 @@
 import { Preferences } from '@capacitor/preferences'
 
 /**
- * Single fetch wrapper every feature should go through. Centralizing this
- * means the JWT-attachment logic, base URL, and error shape only need to
- * be right in one place.
+ * Central API client
  *
- * Token storage uses @capacitor/preferences instead of localStorage —
- * Preferences works identically on native (backed by UserDefaults/
- * SharedPreferences) and web (falls back to localStorage under the hood),
- * so this is the one storage API in the app that's already platform-safe
- * without an explicit isNativePlatform() branch.
+ * Responsibilities:
+ * - JWT access-token handling
+ * - Refresh-token handling
+ * - Auth session storage
+ * - API requests
+ * - Patient APIs
+ * - Doctor APIs
+ * - Medical record CRUD
+ * - Consent APIs
+ * - QR APIs
+ * - Emergency APIs
+ * - Audit APIs
+ * - Sync APIs
  */
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
+const BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ??
+  'http://localhost:8000/api'
+
+/* ============================================================
+   TOKEN / SESSION STORAGE
+   ============================================================ */
 
 async function getToken() {
-  const { value } = await Preferences.get({ key: 'auth_token' })
+  const { value } = await Preferences.get({
+    key: 'auth_token',
+  })
+
   return value
 }
 
 export async function setToken(token) {
-  await Preferences.set({ key: 'auth_token', value: token })
+  await Preferences.set({
+    key: 'auth_token',
+    value: token,
+  })
 }
 
 export async function clearToken() {
-  await Preferences.remove({ key: 'auth_token' })
+  await Preferences.remove({
+    key: 'auth_token',
+  })
 }
-
 
 export async function setRefreshToken(token) {
   await Preferences.set({
@@ -78,6 +97,10 @@ export async function clearAuthSession() {
   })
 }
 
+/* ============================================================
+   AUTH HELPERS
+   ============================================================ */
+
 function isAuthEndpoint(path) {
   return (
     path === '/auth/otp/request' ||
@@ -87,6 +110,10 @@ function isAuthEndpoint(path) {
     path === '/auth/refresh'
   )
 }
+
+/* ============================================================
+   CORE REQUEST
+   ============================================================ */
 
 async function request(
   path,
@@ -99,11 +126,24 @@ async function request(
 ) {
   const token = await getToken()
 
+  // Detect file/multipart requests
+  const isFormData =
+    typeof FormData !== 'undefined' &&
+    body instanceof FormData
+
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
 
     headers: {
-      'Content-Type': 'application/json',
+      // IMPORTANT:
+      // Do NOT manually set Content-Type for FormData.
+      // Browser automatically adds:
+      // multipart/form-data; boundary=...
+      ...(isFormData
+        ? {}
+        : {
+            'Content-Type': 'application/json',
+          }),
 
       ...(token
         ? {
@@ -114,29 +154,26 @@ async function request(
       ...headers,
     },
 
-    body: body
-      ? JSON.stringify(body)
-      : undefined,
+    body:
+      body !== undefined && body !== null
+        ? isFormData
+          ? body
+          : JSON.stringify(body)
+        : undefined,
   })
 
-  /*
-   * Access token expired.
-   *
-   * Try refreshing it once and retrying the
-   * original request.
-   */
+  /* ----------------------------------------------------------
+     ACCESS TOKEN EXPIRED
+     ---------------------------------------------------------- */
+
   if (
     (res.status === 401 || res.status === 403) &&
     !isRetry &&
-     !isAuthEndpoint(path)
+    !isAuthEndpoint(path)
   ) {
     try {
       await refreshAccessToken()
 
-      /*
-       * Retry the original request using the
-       * newly generated access token.
-       */
       return request(
         path,
         {
@@ -146,18 +183,12 @@ async function request(
         },
         true
       )
-    } catch (refreshError) {
-      /*
-       * Refresh token is also invalid/expired.
-       * User must login again.
-       */
-
-
+    } catch {
       await clearToken()
       await clearRefreshToken()
       await clearAuthSession()
 
-       const error = new Error(
+      const error = new Error(
         'Your session has expired. Please login again.'
       )
 
@@ -168,11 +199,26 @@ async function request(
     }
   }
 
+  /* ----------------------------------------------------------
+     API ERROR
+     ---------------------------------------------------------- */
+
   if (!res.ok) {
-    const errorBody =
-      await res.json().catch(() => ({}))
-      
-     const message =
+    const responseText = await res.text()
+
+    let errorBody = {}
+
+    if (responseText) {
+      try {
+        errorBody = JSON.parse(responseText)
+      } catch {
+        errorBody = {
+          message: responseText,
+        }
+      }
+    }
+
+    const message =
       errorBody.message ??
       errorBody.error ??
       errorBody.detail ??
@@ -186,151 +232,524 @@ async function request(
     throw error
   }
 
-  if (res.status === 204) {
+  /* ----------------------------------------------------------
+     EMPTY / JSON / TEXT RESPONSE
+     ---------------------------------------------------------- */
+
+  const responseText = await res.text()
+
+  if (!responseText) {
     return null
   }
 
-  return res.json()
+  try {
+    return JSON.parse(responseText)
+  } catch {
+    return responseText
+  }
 }
+
+/* ============================================================
+   AUTH
+   ============================================================ */
+
+const authApi = {
+  requestOtp: (phoneNumber) =>
+    request('/auth/otp/request', {
+      method: 'POST',
+      body: {
+        phoneNumber,
+      },
+    }),
+
+  verifyOtp: (phoneNumber, otp) =>
+    request('/auth/otp/verify', {
+      method: 'POST',
+      body: {
+        phoneNumber,
+        otp,
+      },
+    }),
+
+  register: (
+    phoneNumber,
+    displayName,
+    role,
+    doctorDetails = null
+  ) =>
+    request('/auth/register', {
+      method: 'POST',
+      body: {
+        phoneNumber,
+        displayName,
+        role,
+
+        ...(role === 'doctor'
+          ? {
+              licenseNumber:
+                doctorDetails?.licenseNumber,
+
+              specialization:
+                doctorDetails?.specialization,
+
+              hospitalId:
+                doctorDetails?.hospitalId ?? null,
+            }
+          : {}),
+      },
+    }),
+
+  verifyRegistration: (phoneNumber, otp) =>
+    request('/auth/register/verify', {
+      method: 'POST',
+      body: {
+        phoneNumber,
+        otp,
+      },
+    }),
+}
+
+/* ============================================================
+   PATIENT
+   ============================================================ */
+
+const patientApi = {
+  getMyProfile: () =>
+    request('/profile/me', {
+      method: 'GET',
+    }),
+
+  updateMyProfile: (data) =>
+    request('/profile/me', {
+      method: 'PATCH',
+      body: data,
+    }),
+
+  getPatientProfile: () =>
+    request('/patients/me'),
+
+  searchPatient: (healthId) =>
+    request(
+      `/patients/search?healthId=${encodeURIComponent(
+        healthId
+      )}`
+    ),
+
+  getDoctorPatient: (patientId) =>
+    request(`/patients/${patientId}`),
+}
+
+/* ============================================================
+   DOCTOR
+   ============================================================ */
+
+const doctorApi = {
+  getAvailableDoctors: () =>
+    request('/doctors/available'),
+
+  getCurrentDoctor: () =>
+    request('/doctors/me'),
+
+  getDoctorActivity: () =>
+    request('/audit/doctor/me'),
+
+  getDoctorPendingConsentRequests: () =>
+    request('/consent/doctor/pending'),
+
+  getDoctorApprovedPatients: () =>
+    request('/consent/doctor/approved-patients'),
+
+  getDoctorPatientRecords: (patientId) =>
+  request(
+    `/records?patientId=${encodeURIComponent(patientId)}`
+  ),
+}
+
+/* ============================================================
+   MEDICAL RECORDS
+   ============================================================ */
+
+/*
+ * Patient's own complete record history.
+ *
+ * GET /api/records/me
+ */
+const recordApi = {
+  getMyRecords: () =>
+    request('/records/me'),
+
+  /*
+   * Get records belonging to a specific patient.
+   *
+   * patientId can be:
+   * - Patient UUID
+   * - User UUID
+   * - Health ID
+   */
+  getPatientRecords: (patientId) =>
+    request(
+      `/records?patientId=${encodeURIComponent(
+        patientId
+      )}`
+    ),
+
+  /*
+   * Alias used by older frontend code.
+   */
+  getRecordsByPatient: (patientId) =>
+    request(
+      `/records?patientId=${encodeURIComponent(
+        patientId
+      )}`
+    ),
+
+  /*
+   * CREATE
+   *
+   * POST /api/records
+   */
+  createRecord: ({
+    patientId = null,
+    healthId = null,
+    fhirResourceType,
+    resourceData,
+    expectedVersion = null,
+  }) =>
+    request('/records', {
+      method: 'POST',
+      body: {
+        patientId,
+        healthId,
+        fhirResourceType,
+        resourceData,
+        expectedVersion,
+      },
+    }),
+
+  /*
+   * UPDATE
+   *
+   * PUT /api/records/{recordId}
+   */
+  updateRecord: (
+    recordId,
+    {
+      patientId = null,
+      healthId = null,
+      fhirResourceType,
+      resourceData,
+      expectedVersion = null,
+    }
+  ) =>
+    request(`/records/${recordId}`, {
+      method: 'PUT',
+      body: {
+        patientId,
+        healthId,
+        fhirResourceType,
+        resourceData,
+        expectedVersion,
+      },
+    }),
+
+  /*
+   * DELETE
+   *
+   * Backend performs a hash-chain tombstone.
+   */
+  deleteRecord: (recordId) =>
+    request(`/records/${recordId}`, {
+      method: 'DELETE',
+    }),
+
+  /*
+   * Verify patient's complete hash chain.
+   */
+  verifyHashChain: (patientId) =>
+    request(
+      `/records/patient/${encodeURIComponent(
+        patientId
+      )}/hash-chain/verify`
+    ),
+}
+
+
+/* ============================================================
+   DOCUMENTS / MEDICAL RECORD ATTACHMENTS
+   ============================================================ */
+
+const documentApi = {
+  /*
+   * Upload a file to a medical record.
+   *
+   * POST /api/documents/upload
+   *
+   * multipart/form-data:
+   * - file
+   * - recordId
+   */
+  uploadDocument: (recordId, file) => {
+    const formData = new FormData()
+
+    formData.append('file', file)
+    formData.append('recordId', recordId)
+
+    return request('/documents/upload', {
+      method: 'POST',
+      body: formData,
+    })
+  },
+
+  /*
+   * Get all attachments belonging to a record.
+   *
+   * GET /api/documents/record/{recordId}
+   */
+  getRecordDocuments: (recordId) =>
+    request(`/documents/record/${recordId}`),
+
+  /*
+   * Download an attachment.
+   */
+  downloadDocument: async (documentId) => {
+    const token = await getAccessToken()
+
+    const response = await fetch(
+      `${BASE_URL}/documents/${documentId}/download`,
+      {
+        method: 'GET',
+        headers: token
+          ? {
+              Authorization: `Bearer ${token}`,
+            }
+          : {},
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to download document: ${response.status}`
+      )
+    }
+
+    return response.blob()
+  },
+
+  /*
+   * Delete an attachment.
+   *
+   * DELETE /api/documents/{documentId}
+   */
+  deleteDocument: (documentId) =>
+    request(`/documents/${documentId}`, {
+      method: 'DELETE',
+    }),
+}
+
+/* ============================================================
+   CONSENT
+   ============================================================ */
+
+const consentApi = {
+  /*
+   * Doctor requests access to patient records.
+   */
+  requestConsent: (patientId, purpose) =>
+    request('/consent/request', {
+      method: 'POST',
+      body: {
+        patientId,
+        purpose,
+      },
+    }),
+
+  /*
+   * Patient requests/gives access to a doctor.
+   */
+  requestConsentByPatient: (
+    doctorId,
+    purpose
+  ) =>
+    request('/consent/patient/request', {
+      method: 'POST',
+      body: {
+        doctorId,
+        purpose,
+      },
+    }),
+
+  getPendingConsentRequests: () =>
+    request('/consent/pending'),
+
+  getConsentStatus: (patientId) =>
+    request(`/consent/status/${patientId}`),
+
+  approveConsent: (consentId) =>
+    request(`/consent/${consentId}/approve`, {
+      method: 'POST',
+    }),
+
+  denyConsent: (consentId) =>
+    request(`/consent/${consentId}/deny`, {
+      method: 'POST',
+    }),
+}
+
+/* ============================================================
+   QR
+   ============================================================ */
+
+const qrApi = {
+  /*
+   * Legacy QR validation.
+   */
+  validateQr: (healthId, payloadHash) =>
+    request('/qr/validate', {
+      method: 'POST',
+      body: {
+        healthId,
+        payloadHash,
+      },
+    }),
+
+  /*
+   * Universal QR resolution.
+   */
+  resolveUniversalQr: (type, token) =>
+    request(
+      `/qr/public/${type}/${encodeURIComponent(
+        token
+      )}`
+    ),
+
+  /*
+   * Patient QR.
+   */
+  generatePatientQr: () =>
+    request('/qr/patient/generate', {
+      method: 'POST',
+    }),
+
+  revokePatientQr: () =>
+    request('/qr/patient/revoke', {
+      method: 'POST',
+    }),
+
+  /*
+   * Doctor QR.
+   */
+  generateDoctorQr: () =>
+    request('/qr/doctor/generate', {
+      method: 'POST',
+    }),
+
+  revokeDoctorQr: () =>
+    request('/qr/doctor/revoke', {
+      method: 'POST',
+    }),
+
+  /*
+   * Legacy doctor QR.
+   */
+  validateDoctorQR: (doctorId) =>
+    request('/qr/doctor/validate', {
+      method: 'POST',
+      body: {
+        doctorId,
+      },
+    }),
+}
+
+/* ============================================================
+   HOSPITALS
+   ============================================================ */
+
+const hospitalApi = {
+  getHospitalsByPincode: (pincode) =>
+    request(
+      `/hospitals/search?pincode=${encodeURIComponent(
+        pincode
+      )}`
+    ),
+}
+
+/* ============================================================
+   EMERGENCY
+   ============================================================ */
+
+const emergencyApi = {
+  getCriticalInfo: (healthId) =>
+    request(
+      `/emergency/critical-info/${encodeURIComponent(
+        healthId
+      )}`
+    ),
+}
+
+/* ============================================================
+   AUDIT / ACTIVITY
+   ============================================================ */
+
+const auditApi = {
+  getRecentActivity: () =>
+    request('/audit/me'),
+}
+
+/* ============================================================
+   OFFLINE SYNC
+   ============================================================ */
+
+const syncApi = {
+  syncRecordWrite: (queueEntry) =>
+    request('/sync/record', {
+      method: 'POST',
+      body: queueEntry,
+    }),
+}
+
+/* ============================================================
+   PUBLIC API CLIENT
+   ============================================================ */
 
 export const apiClient = {
   request,
 
   // Auth
-  register: (
-      phoneNumber,
-      displayName,
-      role,
-      doctorDetails = null
-    ) =>
-      request('/auth/register', {
-        method: 'POST',
-        body: {
-          phoneNumber,
-          displayName,
-          role,
-        
-          ...(role === 'doctor'
-            ? {
-                licenseNumber: doctorDetails?.licenseNumber,
-                specialization: doctorDetails?.specialization,
-                hospitalId: doctorDetails?.hospitalId || null,
-              }
-            : {}),
-        },
-  }),
+  ...authApi,
 
-verifyRegistration: (phoneNumber, otp) =>
-  request('/auth/register/verify', {
-    method: 'POST',
-    body: {
-      phoneNumber,
-      otp,
-    },
-  }),
-  requestOtp: (phoneNumber) => request('/auth/otp/request', { method: 'POST', body: { phoneNumber } }),
-  verifyOtp: (phoneNumber, otp) =>
-    request('/auth/otp/verify', { method: 'POST', body: { phoneNumber, otp } }),
+  // Patient
+  ...patientApi,
 
-  getHospitalsByPincode: (pincode) =>
-  request(
-    `/hospitals/search?pincode=${encodeURIComponent(pincode)}`
-  ),
+  // Doctor
+  ...doctorApi,
 
-  getAvailableDoctors: () =>
-  request('/doctors/available'),
-  
-  // Records (see FHIR resource endpoints — wire these up in Request Set B item 7)
-   // Patient
+  // Medical Records
+  ...recordApi,
 
-   getMyProfile: () =>
-  request('/patients/me'),
+  ...documentApi,
 
-updateMyProfile: (data) =>
-  request('/patients/me', {
-    method: 'PUT',
-    body: data,
-  }),
-
-  getPatientProfile: () =>
-    request(`/patients/me`),
-  
-  getMyRecords: () =>
-  request('/records/me'),
-
-  getRecentActivity: () =>
-  request('/audit/me'),
-
-  getDoctorActivity: () =>
-  request('/audit/doctor/me'),
-
-  getPatientRecords: (patientId) =>
-    request(
-      `/records?patientId=${encodeURIComponent(patientId)}`
-    ),
-
-    getDoctorPatient: (patientId) =>
-  request(`/patients/${patientId}`),
-
-getDoctorPatientRecords: (patientId) =>
-  request(`/patients/${patientId}/records`),
-
-    searchPatient: (healthId) =>
-  request(
-    `/patients/search?healthId=${encodeURIComponent(
-      healthId
-    )}`
-  ),
-  
-  getCriticalInfo: (healthId) =>
-    request(`/emergency/critical-info/${encodeURIComponent(healthId)}`),
-  
   // Consent
-  requestConsent: (patientId, purpose) =>
-  request('/consent/request', {
-    method: 'POST',
-    body: {
-      patientId,
-      purpose,
-    },
-  }),
+  ...consentApi,
 
-  getPendingConsentRequests: () =>
-  request('/consent/pending'),
+  // QR
+  ...qrApi,
 
-  getConsentStatus: (patientId) =>
-  request(`/consent/status/${patientId}`),
+  // Hospitals
+  ...hospitalApi,
 
-  approveConsent: (consentId) =>
-  request(`/consent/${consentId}/approve`, {
-    method: 'POST',
-  }),
+  // Emergency
+  ...emergencyApi,
 
-denyConsent: (consentId) =>
-  request(`/consent/${consentId}/deny`, {
-    method: 'POST',
-  }),
+  // Audit
+  ...auditApi,
 
-  getDoctorPendingConsentRequests: () =>
-  request('/consent/doctor/pending'),
-
-  getDoctorApprovedPatients: () =>
-  request('/consent/doctor/approved-patients'),
-
-  // Sync — called by src/lib/syncQueue.js, not directly by feature code
-  syncRecordWrite: (queueEntry) => request('/sync/record', { method: 'POST', body: queueEntry }),
-
-  getMyProfile: () =>
-  request('/profile/me', {
-    method: 'GET',
-  }),
-
-updateMyProfile: (data) =>
-  request('/profile/me', {
-    method: 'PATCH',
-    body: data,
-  }),
+  // Sync
+  ...syncApi,
 }
+
+/* ============================================================
+   REFRESH ACCESS TOKEN
+   ============================================================ */
 
 async function refreshAccessToken() {
   const refreshToken = await getRefreshToken()
@@ -339,19 +758,35 @@ async function refreshAccessToken() {
     throw new Error('No refresh token available')
   }
 
-  const res = await fetch(`${BASE_URL}/auth/refresh`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      refreshToken,
-    }),
-  })
+  const res = await fetch(
+    `${BASE_URL}/auth/refresh`,
+    {
+      method: 'POST',
 
-   if (!res.ok) {
-    const errorBody =
-      await res.json().catch(() => ({}))
+      headers: {
+        'Content-Type': 'application/json',
+      },
+
+      body: JSON.stringify({
+        refreshToken,
+      }),
+    }
+  )
+
+  if (!res.ok) {
+    const responseText = await res.text()
+
+    let errorBody = {}
+
+    if (responseText) {
+      try {
+        errorBody = JSON.parse(responseText)
+      } catch {
+        errorBody = {
+          message: responseText,
+        }
+      }
+    }
 
     const message =
       errorBody.message ??

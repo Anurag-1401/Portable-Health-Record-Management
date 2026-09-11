@@ -2,6 +2,8 @@ package com.portable_health_record_system.controller.consent;
 
 import com.portable_health_record_system.dto.consent.ConsentRequest;
 import com.portable_health_record_system.dto.consent.ConsentResponse;
+import com.portable_health_record_system.dto.consent.DoctorPatientAccessResponse;
+import com.portable_health_record_system.dto.consent.PatientConsentRequest;
 import com.portable_health_record_system.service.consent.ConsentService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -58,7 +60,15 @@ public List<ConsentResponse> pendingRequestsForDoctor() {
 
 @PreAuthorize("hasRole('DOCTOR')")
 @GetMapping("/doctor/approved-patients")
-public List<ConsentResponse> approvedPatientsForDoctor() {
+public List<DoctorPatientAccessResponse> approvedPatientsForDoctor() {
     return consentService.getApprovedPatientsForCurrentDoctor();
+}
+
+@PreAuthorize("hasRole('PATIENT')")
+@PostMapping("/patient/request")
+public ConsentResponse requestByPatient(
+        @Valid @RequestBody PatientConsentRequest request) {
+
+    return consentService.requestByPatient(request);
 }
 }

@@ -10,7 +10,6 @@ import com.portable_health_record_system.entity.patient.Patient;
 import com.portable_health_record_system.exception.UnauthorizedException;
 import com.portable_health_record_system.repository.auth.UserRepository;
 import com.portable_health_record_system.repository.doctor.DoctorRepository;
-// import com.portable_health_record_system.repository.doctor.HospitalRepository;
 import com.portable_health_record_system.repository.patient.PatientRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -27,8 +26,6 @@ public class ProfileService {
     private final UserRepository userRepository;
     private final PatientRepository patientRepository;
     private final DoctorRepository doctorRepository;
-//     private final HospitalRepository hospitalRepository;
-
 
     // ============================================================
     // GET PROFILE
@@ -48,19 +45,22 @@ public class ProfileService {
                 role.toString(),
                 user.isEnabled(),
 
-                null,
-                null,
-                Collections.emptyList(),
-                Collections.emptyList(),
-                null,
-                null,
+                null, // healthId
+                null, // qrCodePayloadHash
+                null, // bloodGroup
 
-                null,
-                null,
-                null,
-                null,
-                null,
-                null
+                Collections.emptyList(), // allergies
+                Collections.emptyList(), // chronicConditions
+
+                null, // primaryDoctorId
+                null, // primaryDoctorName
+
+                null, // licenseNumber
+                null, // specialization
+                null, // hospitalId
+                null, // hospitalName
+                null, // hospitalRegistrationNumber
+                null  // hospitalAddress
         );
 
         if (role == UserRole.patient) {
@@ -89,7 +89,8 @@ public class ProfileService {
                 .orElseThrow(() ->
                         new IllegalStateException(
                                 "Patient profile not found"
-                        ));
+                        )
+                );
 
         UUID primaryDoctorId = null;
         String primaryDoctorName = null;
@@ -107,14 +108,14 @@ public class ProfileService {
         }
 
         List<Object> allergies =
-            patient.getAllergies() != null
-                    ? patient.getAllergies()
-                    : Collections.emptyList();
+                patient.getAllergies() != null
+                        ? patient.getAllergies()
+                        : Collections.emptyList();
 
-    List<Object> chronicConditions =
-            patient.getChronicConditions() != null
-                    ? patient.getChronicConditions()
-                    : Collections.emptyList();
+        List<Object> chronicConditions =
+                patient.getChronicConditions() != null
+                        ? patient.getChronicConditions()
+                        : Collections.emptyList();
 
         return new ProfileResponse(
                 base.userId(),
@@ -123,7 +124,9 @@ public class ProfileService {
                 base.role(),
                 base.enabled(),
 
+                // Patient
                 patient.getHealthId(),
+                patient.getQrCodePayloadHash(),
                 patient.getBloodGroup(),
 
                 allergies,
@@ -132,6 +135,7 @@ public class ProfileService {
                 primaryDoctorId,
                 primaryDoctorName,
 
+                // Doctor fields are null
                 null,
                 null,
                 null,
@@ -156,7 +160,8 @@ public class ProfileService {
                 .orElseThrow(() ->
                         new IllegalStateException(
                                 "Doctor profile not found"
-                        ));
+                        )
+                );
 
         UUID hospitalId = null;
         String hospitalName = null;
@@ -165,12 +170,17 @@ public class ProfileService {
 
         if (doctor.getHospital() != null) {
 
-            Hospital hospital = doctor.getHospital();
+            Hospital hospital =
+                    doctor.getHospital();
 
             hospitalId = hospital.getId();
-            hospitalName = hospital.getName();
+
+            hospitalName =
+                    hospital.getName();
+
             hospitalRegistrationNumber =
                     hospital.getRegistrationNumber();
+
             hospitalAddress =
                     hospital.getAddress();
         }
@@ -182,13 +192,18 @@ public class ProfileService {
                 base.role(),
                 base.enabled(),
 
-                null,
-                null,
+                // Patient fields are null
+                null, // healthId
+                null, // qrCodePayloadHash
+                null, // bloodGroup
+
                 Collections.emptyList(),
                 Collections.emptyList(),
+
                 null,
                 null,
 
+                // Doctor
                 doctor.getLicenseNumber(),
                 doctor.getSpecialization(),
 
@@ -213,6 +228,7 @@ public class ProfileService {
         User user = getUser(userId);
 
         UserRole role = user.getRole().getName();
+
 
         // --------------------------------------------------------
         // Common user fields
@@ -246,26 +262,34 @@ public class ProfileService {
                     .orElseThrow(() ->
                             new IllegalStateException(
                                     "Patient profile not found"
-                            ));
+                            )
+                    );
 
             if (request.bloodGroup() != null) {
+
                 patient.setBloodGroup(
-                        request.bloodGroup()
+                        request.bloodGroup().trim()
                 );
             }
 
             if (request.allergies() != null) {
+
                 patient.setAllergies(
                         request.allergies()
                 );
             }
 
             if (request.chronicConditions() != null) {
+
                 patient.setChronicConditions(
                         request.chronicConditions()
                 );
             }
 
+            /*
+             * Primary doctor ID must reference doctors.id,
+             * not users.id.
+             */
             if (request.primaryDoctorId() != null) {
 
                 Doctor doctor = doctorRepository
@@ -275,7 +299,8 @@ public class ProfileService {
                         .orElseThrow(() ->
                                 new IllegalArgumentException(
                                         "Primary doctor not found"
-                                ));
+                                )
+                        );
 
                 patient.setPrimaryDoctor(doctor);
 
@@ -299,7 +324,8 @@ public class ProfileService {
                     .orElseThrow(() ->
                             new IllegalStateException(
                                     "Doctor profile not found"
-                            ));
+                            )
+                    );
 
             if (request.specialization() != null) {
 
@@ -308,23 +334,12 @@ public class ProfileService {
                 );
             }
 
-        //     if (request.hospitalId() != null) {
-
-        //         Hospital hospital = hospitalRepository
-        //                 .findById(
-        //                         request.hospitalId()
-        //                 )
-        //                 .orElseThrow(() ->
-        //                         new IllegalArgumentException(
-        //                                 "Hospital not found"
-        //                         ));
-
-        //         doctor.setHospital(hospital);
-
-        //     } else {
-
-        //         doctor.setHospital(null);
-        //     }
+            /*
+             * Hospital update is intentionally left disabled
+             * until HospitalRepository is wired here.
+             *
+             * Doctor registration already assigns hospital.
+             */
 
             doctorRepository.save(doctor);
         }
@@ -344,6 +359,7 @@ public class ProfileService {
                 .orElseThrow(() ->
                         new UnauthorizedException(
                                 "User not found"
-                        ));
+                        )
+                );
     }
 }

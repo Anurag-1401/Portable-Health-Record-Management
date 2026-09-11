@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../hooks/useAuth'
 import { apiClient } from '../../../lib/apiClient'
+import { useNavigate } from 'react-router-dom'
 
 import { AppShell } from '../../../components/layout/AppShell'
 import { QRDisplay } from '../../../components/qr/QRDisplay'
 import { Card } from '../../../components/ui/Card'
 import { Badge } from '../../../components/ui/Badge'
 import { Button } from '../../../components/ui/Button'
+import { profileApi } from '../../auth/api/authApi'
 
 export default function PatientDashboard() {
   const { session } = useAuth()
+  const navigate = useNavigate()
 
   const [profile, setProfile] = useState(null)
+  const [patientQr, setPatientQr] = useState(null)
+const [qrLoading, setQrLoading] = useState(false)
   const [records, setRecords] = useState([])
   const [criticalInfo, setCriticalInfo] = useState(null)
   const [isEditingProfile, setIsEditingProfile] = useState(false)
@@ -198,6 +203,19 @@ const handleDenyConsent = async (consentId) => {
     )
   } finally {
     setProcessingConsentId(null)
+  }
+}
+
+async function handleGenerateQr() {
+  setQrLoading(true)
+
+  try {
+    const result = await profileApi.generatePatientQr()
+    setPatientQr(result)
+  } catch (error) {
+    console.error('Failed to generate patient QR:', error)
+  } finally {
+    setQrLoading(false)
   }
 }
 
@@ -444,142 +462,457 @@ const handleDenyConsent = async (consentId) => {
 
         {/* ================= OVERVIEW ================= */}
 
-        {activeTab === 'overview' && (
-          <div className="grid gap-4 lg:grid-cols-3">
+{activeTab === 'overview' && (
+  <div className="flex flex-col gap-6">
 
-            {/* QR */}
-            <div className="lg:col-span-1">
+    {/* =========================================================
+        TOP SECTION — QR + HEALTH SUMMARY
+    ========================================================= */}
+
+    <div className="grid gap-6 lg:grid-cols-3">
+
+      {/* ================= MY QR ================= */}
+
+      <Card className="lg:col-span-1">
+        <div className="flex flex-col">
+
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-neutral-900">
+              My Health QR
+            </h2>
+
+            <p className="mt-1 text-sm leading-5 text-neutral-500">
+              Share your QR with authorized healthcare
+              providers to access your medical information.
+            </p>
+          </div>
+
+          {/* QR */}
+          {patientQr ? (
+            <div className="flex flex-col items-center">
               <QRDisplay
-                healthId={healthId}
-                payloadHash={
-                  profile?.qrCodePayloadHash ??
-                  'PENDING'
-                }
-                displayName={patientName}
+                qrUrl={patientQr.qrUrl}
+                displayName={profile.displayName}
+                expiresAt={patientQr.expiresAt}
+                onRevoked={() => {
+                  setPatientQr(null)
+                }}
               />
             </div>
+          ) : (
+            <div className="flex flex-col items-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50 p-6 text-center">
 
-            {/* Health summary */}
-            <div className="flex flex-col gap-4 lg:col-span-2">
-
-              <div className="grid gap-4 sm:grid-cols-3">
-
-                <StatCard
-                  title="Medical Records"
-                  value={
-                    isLoadingRecords
-                      ? '...'
-                      : recordCount
-                  }
-                />
-
-                <StatCard
-                  title="Blood Group"
-                  value={bloodGroup}
-                />
-
-                <StatCard
-                  title="Health ID"
-                  value={healthId}
-                  small
-                />
-
+              <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-lg bg-white shadow-sm">
+                <span className="text-2xl">
+                  QR
+                </span>
               </div>
 
-              {/* Critical information */}
-              <Card>
-                <div className="flex items-center justify-between">
+              <h3 className="font-medium text-neutral-800">
+                No active QR code
+              </h3>
 
-                  <div>
-                    <h2 className="font-semibold text-neutral-900">
-                      Emergency Information
-                    </h2>
+              <p className="mt-1 text-xs text-neutral-500">
+                Generate a secure QR code to share your
+                health identity.
+              </p>
 
-                    <p className="mt-1 text-sm text-neutral-500">
-                      Critical information available to
-                      authorized emergency responders.
-                    </p>
-                  </div>
-
-                  <Button
-                    type="button"
-                    onClick={loadCriticalInfo}
-                    disabled={isLoadingCritical}
-                  >
-                    {isLoadingCritical
-                      ? 'Loading...'
-                      : 'View'}
-                  </Button>
-
-                </div>
-
-                {criticalInfo && (
-                  <div className="mt-4 rounded-lg bg-neutral-50 p-4">
-                    <pre className="whitespace-pre-wrap text-sm text-neutral-700">
-                      {JSON.stringify(
-                        criticalInfo,
-                        null,
-                        2
-                      )}
-                    </pre>
-                  </div>
-                )}
-              </Card>
+              <Button
+                type="button"
+                className="mt-4"
+                disabled={qrLoading}
+                onClick={handleGenerateQr}
+              >
+                {qrLoading
+                  ? 'Generating...'
+                  : 'Generate My QR'}
+              </Button>
 
             </div>
+          )}
+
+          {/* Doctor QR action */}
+          <div className="mt-5 border-t border-neutral-200 pt-5">
+
+            <h3 className="text-sm font-semibold text-neutral-800">
+              Connect with Doctor
+            </h3>
+
+            <p className="mt-1 text-xs leading-5 text-neutral-500">
+              Scan your doctor's QR code to give access
+              for a medical consultation.
+            </p>
+
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-3 w-full"
+              onClick={() =>
+                navigate('/patient/scan-doctor')
+              }
+            >
+              Scan Doctor QR
+            </Button>
+
+          </div>
+
+        </div>
+      </Card>
+
+
+      {/* ================= HEALTH SUMMARY ================= */}
+
+      <div className="flex flex-col gap-4 lg:col-span-2">
+
+        <div>
+          <h2 className="text-lg font-semibold text-neutral-900">
+            Health Overview
+          </h2>
+
+          <p className="mt-1 text-sm text-neutral-500">
+            Quick summary of your health information.
+          </p>
+        </div>
+
+        {/* Statistics */}
+        <div className="grid gap-4 sm:grid-cols-3">
+
+          <StatCard
+            title="Medical Records"
+            value={
+              isLoadingRecords
+                ? '...'
+                : recordCount
+            }
+          />
+
+          <StatCard
+            title="Blood Group"
+            value={bloodGroup}
+          />
+
+          <StatCard
+            title="Health ID"
+            value={healthId}
+            small
+          />
+
+        </div>
+
+        {/* Additional health information */}
+        <Card>
+
+          <div className="mb-4">
+            <h3 className="font-semibold text-neutral-900">
+              Health Information
+            </h3>
+
+            <p className="mt-1 text-sm text-neutral-500">
+              Important information from your health profile.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+
+            <div className="rounded-lg bg-neutral-50 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                Medical Records
+              </p>
+
+              <p className="mt-1 text-lg font-semibold text-neutral-900">
+                {isLoadingRecords
+                  ? '...'
+                  : recordCount}
+              </p>
+
+              <p className="mt-1 text-xs text-neutral-500">
+                Total records in your health history
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-neutral-50 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                Health ID
+              </p>
+
+              <p className="mt-1 break-all font-mono text-sm font-semibold text-neutral-900">
+                {healthId}
+              </p>
+
+              <p className="mt-1 text-xs text-neutral-500">
+                Your Portable Health Record identifier
+              </p>
+            </div>
+
+          </div>
+
+        </Card>
+
+      </div>
+
+    </div>
+
+
+    {/* =========================================================
+        EMERGENCY INFORMATION
+    ========================================================= */}
+
+    <Card>
+
+      <div className="flex flex-col gap-4">
+
+        {/* Header */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+          <div className="flex items-start gap-3">
+
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emergency-50 text-emergency-700">
+              !
+            </div>
+
+            <div>
+              <h2 className="font-semibold text-neutral-900">
+                Emergency Information
+              </h2>
+
+              <p className="mt-1 text-sm leading-5 text-neutral-500">
+                Critical health information available to
+                authorized emergency responders.
+              </p>
+            </div>
+
+          </div>
+
+          <Button
+            type="button"
+            variant="emergency"
+            onClick={loadCriticalInfo}
+            disabled={isLoadingCritical}
+          >
+            {isLoadingCritical
+              ? 'Loading...'
+              : criticalInfo
+                ? 'Refresh'
+                : 'View Information'}
+          </Button>
+
+        </div>
+
+
+        {/* Information */}
+        {criticalInfo ? (
+          <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+
+            <div className="mb-3 flex items-center justify-between">
+
+              <div>
+                <p className="text-sm font-medium text-neutral-800">
+                  Critical Health Data
+                </p>
+
+                <p className="text-xs text-neutral-500">
+                  Authorized emergency information
+                </p>
+              </div>
+
+              <Badge tone="trust">
+                Available
+              </Badge>
+
+            </div>
+
+            <pre className="max-h-80 overflow-auto rounded-lg bg-white p-4 text-xs leading-5 text-neutral-700">
+              {JSON.stringify(
+                criticalInfo,
+                null,
+                2
+              )}
+            </pre>
+
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-neutral-300 p-6 text-center">
+
+            <p className="text-sm font-medium text-neutral-700">
+              Emergency information has not been loaded.
+            </p>
+
+            <p className="mt-1 text-xs text-neutral-500">
+              Click "View Information" when you need to
+              review your authorized emergency health data.
+            </p>
+
           </div>
         )}
 
+      </div>
+
+    </Card>
+
+
+    {/* =========================================================
+        QUICK ACTIONS
+    ========================================================= */}
+
+    <Card>
+
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-neutral-900">
+          Quick Actions
+        </h2>
+
+        <p className="mt-1 text-sm text-neutral-500">
+          Common actions for managing your portable health record.
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+
+        <button
+          type="button"
+          onClick={() =>
+            navigate('/patient/records')
+          }
+          className="rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:bg-neutral-50"
+        >
+          <p className="font-medium text-neutral-900">
+            Medical Records
+          </p>
+
+          <p className="mt-1 text-xs leading-5 text-neutral-500">
+            View, create and manage your medical records.
+          </p>
+        </button>
+
+
+        <button
+          type="button"
+          onClick={() =>
+            navigate('/patient/scan-doctor')
+          }
+          className="rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:bg-neutral-50"
+        >
+          <p className="font-medium text-neutral-900">
+            Connect Doctor
+          </p>
+
+          <p className="mt-1 text-xs leading-5 text-neutral-500">
+            Scan a doctor's QR code and grant access.
+          </p>
+        </button>
+
+
+        <button
+          type="button"
+          onClick={() =>
+            navigate('/patient/records')
+          }
+          className="rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:bg-neutral-50"
+        >
+          <p className="font-medium text-neutral-900">
+            Health History
+          </p>
+
+          <p className="mt-1 text-xs leading-5 text-neutral-500">
+            Review your complete FHIR-based health history.
+          </p>
+        </button>
+
+      </div>
+
+    </Card>
+
+  </div>
+)}
+
         {/* ================= RECORDS ================= */}
 
-        {activeTab === 'records' && (
-          <Card>
+{activeTab === 'records' && (
+  <Card>
 
-            <div className="mb-5">
-              <h2 className="text-lg font-semibold text-neutral-900">
-                Medical Records
-              </h2>
+    {/* Header */}
+    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h2 className="text-lg font-semibold text-neutral-900">
+          Medical Records
+        </h2>
 
-              <p className="mt-1 text-sm text-neutral-500">
-                Your FHIR-based health records.
-              </p>
-            </div>
+        <p className="mt-1 text-sm text-neutral-500">
+          Your FHIR-based health records.
+        </p>
+      </div>
 
-            {isLoadingRecords ? (
-              <p className="text-sm text-neutral-500">
-                Loading medical records...
-              </p>
-            ) : recentRecords.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-neutral-300 p-8 text-center">
-                <h3 className="font-medium text-neutral-700">
-                  No medical records
-                </h3>
+      <Button
+        type="button"
+        onClick={() => navigate('/patient/records')}
+      >
+        Manage Records
+      </Button>
+    </div>
 
-                <p className="mt-1 text-sm text-neutral-500">
-                  Your medical records will appear here
-                  when they are added by an authorized
-                  healthcare provider.
-                </p>
-              </div>
-            ) : (
-              <div className="flex flex-col divide-y divide-neutral-200">
+    {/* Loading */}
+    {isLoadingRecords ? (
+      <p className="text-sm text-neutral-500">
+        Loading medical records...
+      </p>
 
-                {recentRecords.map((record) => (
-                  <MedicalRecordItem
-                    key={
-                      record.id ??
-                      record.recordId ??
-                      record.versionId
-                    }
-                    record={record}
-                  />
-                ))}
+    ) : recentRecords.length === 0 ? (
 
-              </div>
-            )}
+      /* No records */
+      <div className="rounded-lg border border-dashed border-neutral-300 p-8 text-center">
 
-          </Card>
-        )}
+        <h3 className="font-medium text-neutral-700">
+          No medical records
+        </h3>
+
+        <p className="mt-1 text-sm text-neutral-500">
+          You don't have any medical records yet.
+        </p>
+
+        <div className="mt-4">
+          <Button
+            type="button"
+            onClick={() => navigate('/patient/records')}
+          >
+            + Create Medical Record
+          </Button>
+        </div>
+
+      </div>
+
+    ) : (
+
+      /* Existing records */
+      <div className="flex flex-col divide-y divide-neutral-200">
+
+        {recentRecords.map((record) => (
+          <MedicalRecordItem
+            key={
+              record.id ??
+              record.recordId ??
+              record.record_id ??
+              record.versionId
+            }
+            record={record}
+          />
+        ))}
+
+        {/* View all */}
+        <div className="pt-4">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => navigate('/patient/records')}
+          >
+            View & Manage All Records
+          </Button>
+        </div>
+
+      </div>
+    )}
+
+  </Card>
+)}
 
         {/* ================= PROFILE ================= */}
 
@@ -1271,14 +1604,12 @@ function AccessCard({
 
 function MedicalRecordItem({ record }) {
   const resourceType =
-    record.fhirResourceType ??
-    record.resourceType ??
-    record.type ??
+    record.fhir_resource_type ??
     'Medical Record'
 
   const date =
-    record.updatedAt ??
-    record.createdAt
+    record.updated_at ??
+    record.createdt
 
   const formattedDate = date
     ? new Date(date).toLocaleString()
@@ -1293,7 +1624,7 @@ function MedicalRecordItem({ record }) {
         </h3>
 
         <p className="mt-1 text-sm text-neutral-500">
-          Version {record.versionNumber ?? record.currentVersion ?? 1}
+          Version {record.current_version ?? 1}
           {' · '}
           {formattedDate}
         </p>

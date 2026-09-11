@@ -11,6 +11,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.Map;
 
 @Entity
 @Table(name = "record_versions", uniqueConstraints = {
@@ -38,7 +39,7 @@ public class RecordVersion extends EntityBase {
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "resource_data", columnDefinition = "jsonb", nullable = false)
-    private Object resourceData;
+    private Map<String, Object> resourceData;
 
     @Column(name = "previous_record_hash", length = 64)
     private String previousRecordHash;

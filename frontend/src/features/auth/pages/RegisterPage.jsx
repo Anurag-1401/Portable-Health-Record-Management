@@ -5,9 +5,21 @@ import { setToken } from '../../../lib/apiClient'
 import { Button } from '../../../components/ui/Button'
 import { Card } from '../../../components/ui/Card'
 
+
+function sanitizeName(value) {
+  return value
+    .replace(/[^A-Za-zÀ-ÖØ-öø-ÿ' -]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^\s+/, '')
+}
+
+
 export default function RegisterPage() {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [displayName, setDisplayName] = useState('')
+
+  const [nameError, setNameError] = useState('')
+const [phoneError, setPhoneError] = useState('')
   const [role, setRole] = useState('patient')
 
   // Doctor-specific fields
@@ -18,16 +30,96 @@ export default function RegisterPage() {
   const [selectedHospitalId, setSelectedHospitalId] = useState('')
   const [isLoadingHospitals, setIsLoadingHospitals] = useState(false)
   const [otp, setOtp] = useState('')
+  const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', ''])
   const [step, setStep] = useState('details')
   const [error, setError] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const navigate = useNavigate()
 
+  function handleOtpChange(index, value) {
+  const digit = value.replace(/\D/g, '').slice(-1)
+
+  const updated = [...otpDigits]
+  updated[index] = digit
+
+  setOtpDigits(updated)
+  setOtp(updated.join(''))
+  setError(null)
+
+  if (digit && index < 5) {
+    document.getElementById(`register-otp-${index + 1}`)?.focus()
+  }
+}
+
+function handleOtpKeyDown(index, e) {
+  if (
+    e.key === 'Backspace' &&
+    !otpDigits[index] &&
+    index > 0
+  ) {
+    document.getElementById(`register-otp-${index - 1}`)?.focus()
+  }
+
+  if (e.key === 'ArrowLeft' && index > 0) {
+    document.getElementById(`register-otp-${index - 1}`)?.focus()
+  }
+
+  if (e.key === 'ArrowRight' && index < 5) {
+    document.getElementById(`register-otp-${index + 1}`)?.focus()
+  }
+}
+
+function handleOtpPaste(e) {
+  e.preventDefault()
+
+  const pasted = e.clipboardData
+    .getData('text')
+    .replace(/\D/g, '')
+    .slice(0, 6)
+
+  if (!pasted) {
+    setError('Please paste a valid 6-digit OTP.')
+    return
+  }
+
+  const digits = [
+    ...pasted.split(''),
+    ...Array(6 - pasted.length).fill(''),
+  ]
+
+  setOtpDigits(digits)
+  setOtp(pasted)
+  setError(null)
+
+  const nextIndex = Math.min(pasted.length, 5)
+  document.getElementById(`register-otp-${nextIndex}`)?.focus()
+}
+
   async function handleRegister(e) {
     e.preventDefault()
     setError(null)
 
+    setNameError('')
+  setPhoneError('')
+
+   const trimmedName = displayName.trim()
+  const normalizedPhone = phoneNumber.replace(/^\+91/, '')
+
+  if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '-][A-Za-zÀ-ÖØ-öø-ÿ]+)*$/.test(trimmedName)) {
+    setNameError(
+      'Enter a valid name using only letters, spaces, hyphens, or apostrophes.'
+    )
+    return
+  }
+
+  if (!/^\d{10}$/.test(normalizedPhone)) {
+    setPhoneError(
+      'Enter a valid 10-digit Indian phone number.'
+    )
+    return
+  }
+  
     // Extra frontend validation for doctors
     if (role === 'doctor') {
   if (!licenseNumber.trim()) {
@@ -104,6 +196,12 @@ export default function RegisterPage() {
   async function handleVerifyRegistration(e) {
     e.preventDefault()
     setError(null)
+
+    if (!/^\d{6}$/.test(otp)) {
+    setError('Please enter the complete 6-digit OTP.')
+    return
+  }
+  
     setIsSubmitting(true)
 
     try {
@@ -143,27 +241,115 @@ export default function RegisterPage() {
               Full name
 
               <input
-                type="text"
-                required
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
-                placeholder="Enter your name"
-              />
+  type="text"
+  required
+  value={displayName}
+  maxLength={100}
+  onChange={(e) => {
+    const value = e.target.value
+
+    const hasInvalidCharacter =
+      /[^A-Za-zÀ-ÖØ-öø-ÿ' -]/.test(value)
+
+    if (hasInvalidCharacter) {
+      setNameError(
+        'Name can contain only letters, spaces, hyphens, and apostrophes.'
+      )
+    } else {
+      setNameError('')
+    }
+
+    setDisplayName(sanitizeName(value))
+  }}
+  onBlur={() => {
+    if (!displayName.trim()) {
+      setNameError('Full name is required.')
+    }
+  }}
+  className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm ${
+    nameError
+      ? 'border-emergency-500 focus:outline-none'
+      : 'border-neutral-200'
+  }`}
+  placeholder="Enter your name"
+/>
+
+{nameError && (
+  <p className="mt-1 text-xs text-emergency-600">
+    {nameError}
+  </p>
+)}
             </label>
 
             {/* Phone */}
             <label className="text-sm text-neutral-700">
               Phone number
 
-              <input
-                type="tel"
-                required
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
-                placeholder="+91 XXXXX XXXXX"
-              />
+             <input
+  type="tel"
+  required
+  inputMode="tel"
+  value={phoneNumber}
+  maxLength={13}
+  onChange={(e) => {
+  let value = e.target.value
+
+  // Allow only digits and +
+  value = value.replace(/[^\d+]/g, '')
+
+  // + is allowed only at the beginning
+  if (value.includes('+')) {
+    value = '+' + value.replace(/\+/g, '')
+  }
+
+  // If it starts with +91, allow +91 + maximum 10 digits
+  if (value.startsWith('+91')) {
+    value = '+91' + value.slice(3).replace(/\D/g, '').slice(0, 10)
+  } else if (value.startsWith('+')) {
+    // While user is typing +, +9, +91...
+    value = '+' + value.slice(1).replace(/\D/g, '').slice(0, 12)
+  } else {
+    // Without +, maximum 10 digits
+    value = value.replace(/\D/g, '').slice(0, 10)
+  }
+
+  setPhoneNumber(value)
+
+  // Validation
+  const digits = value.startsWith('+91')
+    ? value.slice(3)
+    : value.startsWith('+')
+      ? value.slice(1)
+      : value
+
+  if (digits.length > 0 && digits.length !== 10) {
+    setPhoneError('Enter a valid 10-digit Indian phone number.')
+  } else {
+    setPhoneError('')
+  }
+}}
+  onBlur={() => {
+    const normalized = phoneNumber.replace(/^\+91/, '')
+
+    if (!/^\d{10}$/.test(normalized)) {
+      setPhoneError(
+        'Enter a valid 10-digit Indian phone number.'
+      )
+    }
+  }}
+  className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm ${
+    phoneError
+      ? 'border-emergency-500 focus:outline-none'
+      : 'border-neutral-200'
+  }`}
+  placeholder="+91XXXXXXXXXX"
+/>
+
+{phoneError && (
+  <p className="mt-1 text-xs text-emergency-600">
+    {phoneError}
+  </p>
+)}
             </label>
 
             {/* Role */}
@@ -323,15 +509,38 @@ export default function RegisterPage() {
             <label className="text-sm text-neutral-700">
               Enter the OTP sent to {phoneNumber}
 
-              <input
-                type="text"
-                required
-                maxLength={6}
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm"
-                placeholder="6-digit code"
-              />
+              <div className="mt-3">
+  <div className="flex justify-between gap-2">
+    {otpDigits.map((digit, index) => (
+      <input
+        key={index}
+        id={`register-otp-${index}`}
+        type="text"
+        inputMode="numeric"
+        autoComplete={index === 0 ? 'one-time-code' : 'off'}
+        maxLength={1}
+        value={digit}
+        onChange={(e) =>
+          handleOtpChange(index, e.target.value)
+        }
+        onKeyDown={(e) =>
+          handleOtpKeyDown(index, e)
+        }
+        onPaste={handleOtpPaste}
+        className={`h-12 w-11 rounded-lg border-2 text-center text-lg font-semibold outline-none transition-colors ${
+          digit
+            ? 'border-trust-600 bg-trust-50 text-trust-800'
+            : 'border-neutral-300 bg-white text-neutral-900'
+        } focus:border-trust-600 focus:ring-2 focus:ring-trust-100`}
+        aria-label={`OTP digit ${index + 1}`}
+      />
+    ))}
+  </div>
+
+  <p className="mt-2 text-xs text-neutral-500">
+    Enter the 6-digit OTP
+  </p>
+</div>
             </label>
 
             <Button type="submit" disabled={isSubmitting}>

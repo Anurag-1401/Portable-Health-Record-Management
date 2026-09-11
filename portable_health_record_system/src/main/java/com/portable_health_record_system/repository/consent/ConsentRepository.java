@@ -25,4 +25,6 @@ boolean existsByPatientIdAndDoctorIdAndStatus(
         UUID doctorId,
         ConsentStatus status
 );
+
+List<Consent> findByDoctorIdOrderByRequestedAtDesc(UUID doctorId);
 }

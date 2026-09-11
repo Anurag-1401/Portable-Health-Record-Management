@@ -1,6 +1,8 @@
 package com.portable_health_record_system.dto.record;
 
 import com.portable_health_record_system.common.FhirResourceType;
+
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 
 import java.util.Map;
@@ -10,6 +12,6 @@ public record RecordWriteRequest(
         UUID patientId,
         String healthId,
         @NotNull FhirResourceType fhirResourceType,
-        @NotNull Map<String, Object> resourceData,
+        @NotEmpty  Map<String, Object> resourceData,
         Long expectedVersion
 ) {}

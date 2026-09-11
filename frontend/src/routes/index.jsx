@@ -7,6 +7,7 @@ import PatientDashboard from '../features/patient/pages/PatientDashboard'
 import PatientRecords from '../features/patient/pages/PatientRecords'
 import DoctorDashboard from '../features/doctor/pages/DoctorDashboard'
 import ScanPatientQR from '../features/doctor/pages/RequestConsent'
+import DoctorQRScanPage from '../components/qr/DoctorQRScanPage'
 import EmergencyAccess from '../features/emergency/pages/EmergencyAccess'
 import EligibilityCheck from '../features/government/pages/EligibilityCheck'
 import RegisterPage from '../features/auth/pages/RegisterPage'
@@ -16,6 +17,7 @@ import DoctorPatientSearch from '../features/doctor/components/DoctorPatientSear
 import DoctorPatientDetails from '../features/doctor/components/DoctorPatientDetails'
 import DoctorConsents from '../features/doctor/components/DoctorConsents'
 import DoctorSync from '../features/doctor/components/DoctorSync'
+import UniversalQRPage from '../components/qr/pages/UniversalQRPage'
 import { GuestRoute } from './GuestRoute'
 
 export function AppRoutes() {
@@ -58,6 +60,15 @@ export function AppRoutes() {
       />
 
       <Route
+  path="/patient/scan-doctor"
+  element={
+    <ProtectedRoute allow={[USER_ROLES.PATIENT]}>
+      <DoctorQRScanPage />
+    </ProtectedRoute>
+  }
+/>
+
+      <Route
         path="/doctor"
         element={
           <ProtectedRoute allow={[USER_ROLES.DOCTOR]}>
@@ -73,6 +84,11 @@ export function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
+      <Route
+  path="/qr/:type/:token"
+  element={<UniversalQRPage />}
+/>
 
         <Route
           path="/doctor/patients"

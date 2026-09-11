@@ -1,8 +1,18 @@
 const VARIANTS = {
-  primary: 'bg-trust-600 text-white hover:bg-trust-800 focus-visible:ring-trust-400',
-  emergency: 'bg-emergency-600 text-white hover:bg-emergency-800 focus-visible:ring-emergency-400',
-  secondary: 'bg-white text-trust-600 border border-trust-600 hover:bg-trust-50 focus-visible:ring-trust-400',
-  ghost: 'bg-transparent text-neutral-800 hover:bg-neutral-100 focus-visible:ring-neutral-400',
+  primary:
+    'bg-trust-600 text-white hover:bg-trust-800 focus-visible:ring-trust-400',
+
+  emergency:
+    'bg-emergency-600 text-white hover:bg-emergency-800 focus-visible:ring-emergency-400',
+
+  secondary:
+    'bg-white text-trust-600 border border-trust-600 hover:bg-trust-50 focus-visible:ring-trust-400',
+
+  ghost:
+    'bg-transparent text-neutral-800 hover:bg-neutral-100 focus-visible:ring-neutral-400',
+
+  danger:
+    'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-400',
 }
 
 export function Button({ variant = 'primary', className = '', children, ...props }) {

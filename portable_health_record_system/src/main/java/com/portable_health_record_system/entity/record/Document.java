@@ -8,12 +8,31 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "documents", indexes = @Index(name = "idx_documents_patient", columnList = "patient_id"))
-@Getter @Setter @NoArgsConstructor
+@Table(
+    name = "documents",
+    indexes = {
+        @Index(
+            name = "idx_documents_patient",
+            columnList = "patient_id"
+        ),
+        @Index(
+            name = "idx_documents_record",
+            columnList = "record_id"
+        )
+    }
+)
+@Getter
+@Setter
+@NoArgsConstructor
 public class Document extends EntityBase {
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "patient_id", nullable = false)
     private Patient patient;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "record_id")
+    private MedicalRecord record;
 
     @Column(name = "file_name", nullable = false, length = 255)
     private String fileName;
@@ -26,4 +45,7 @@ public class Document extends EntityBase {
 
     @Column(name = "sha256", nullable = false, length = 64)
     private String sha256;
+
+    @Column(name = "file_size", nullable = false)
+    private long fileSize;
 }

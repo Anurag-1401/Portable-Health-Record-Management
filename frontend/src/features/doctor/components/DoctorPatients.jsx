@@ -186,119 +186,299 @@ export default function DoctorPatients() {
         {/* Patients */}
         {/* -------------------------------- */}
 
-        {!loading &&
-          !error &&
-          patients.length > 0 && (
-            <div className="flex flex-col gap-4">
+       {!loading && !error && patients.length > 0 && (() => {
+  const validPatients = patients.filter((patient) => {
+    const expiresAt =
+      patient.expiresAt ??
+      patient.expires_at ??
+      null
 
-              <div>
-                <h2 className="text-lg font-medium text-neutral-900">
-                  My Patients
-                </h2>
+    return (
+      patient.status !== 'EXPIRED' &&
+      (!expiresAt ||
+        new Date(expiresAt).getTime() > Date.now())
+    )
+  })
 
-                <p className="mt-1 text-sm text-neutral-500">
-                  {patients.length}{' '}
-                  {patients.length === 1
-                    ? 'patient'
-                    : 'patients'}{' '}
-                  with approved access.
-                </p>
-              </div>
+  const expiredPatients = patients.filter((patient) => {
+    const expiresAt =
+      patient.expiresAt ??
+      patient.expires_at ??
+      null
 
-              {patients.map((patient) => {
+    return (
+      patient.status === 'EXPIRED' ||
+      (
+        expiresAt &&
+        new Date(expiresAt).getTime() <= Date.now()
+      )
+    )
+  })
 
-                /*
-                 * ConsentResponse may currently return
-                 * patientId rather than id.
-                 */
-                const patientId =
-                  patient.patientId ??
-                  patient.patient_id ??
-                  patient.id
+  return (
+    <div className="flex flex-col gap-8">
 
-                const patientName =
-                  patient.patientName ??
-                  patient.patient_name ??
-                  patient.name ??
-                  'Patient'
+      {/* ================================================= */}
+      {/* VALID CONSENTS */}
+      {/* ================================================= */}
 
-                const healthId =
-                  patient.healthId ??
-                  patient.health_id
+      <section>
+        <div className="mb-4">
+          <h2 className="text-lg font-medium text-neutral-900">
+            Valid Consents
+          </h2>
 
-                return (
-                  <Card
-                    key={
-                      patient.consentId ??
-                      patient.id ??
-                      patientId
-                    }
-                  >
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="mt-1 text-sm text-neutral-500">
+            Patients whose consent is currently active.
+          </p>
+        </div>
 
-                      <div>
+        {validPatients.length === 0 ? (
+          <Card>
+            <div className="py-6 text-center">
+              <p className="text-sm text-neutral-500">
+                No patients with valid consent.
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-4">
 
-                        <p className="font-medium text-neutral-900">
-                          {patientName}
+            {validPatients.map((patient) => {
+
+              const patientId =
+                patient.patientId ??
+                patient.patient_id ??
+                patient.id
+
+              const patientName =
+                patient.patientName ??
+                patient.patient_name ??
+                patient.name ??
+                'Patient'
+
+              const healthId =
+                patient.healthId ??
+                patient.health_id
+
+              const expiresAt =
+                patient.expiresAt ??
+                patient.expires_at ??
+                null
+
+              return (
+                <Card
+                  key={
+                    patient.consentId ??
+                    patient.consent_id ??
+                    patient.id ??
+                    patientId
+                  }
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+                    {/* Patient information */}
+
+                    <div>
+
+                      <p className="font-medium text-neutral-900">
+                        {patientName}
+                      </p>
+
+                      {healthId && (
+                        <p className="mt-1 text-sm text-neutral-500">
+                          Health ID: {healthId}
                         </p>
+                      )}
 
-                        {healthId && (
-                          <p className="mt-1 text-sm text-neutral-500">
-                            Health ID: {healthId}
-                          </p>
-                        )}
+                      {patientId && (
+                        <p className="mt-1 text-xs text-neutral-400">
+                          Patient ID: {patientId}
+                        </p>
+                      )}
 
-                        {patientId && (
-                          <p className="mt-1 text-xs text-neutral-400">
-                            Patient ID: {patientId}
-                          </p>
-                        )}
+                      {patient.purpose && (
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Purpose: {patient.purpose}
+                        </p>
+                      )}
 
-                        {patient.purpose && (
-                          <p className="mt-1 text-xs text-neutral-500">
-                            Purpose: {patient.purpose}
-                          </p>
-                        )}
-
-                        {patient.respondedAt && (
-                          <p className="mt-1 text-xs text-neutral-400">
-                            Approved:{' '}
-                            {new Date(
-                              patient.respondedAt
-                            ).toLocaleString()}
-                          </p>
-                        )}
-
-                      </div>
-
-                      <div className="flex items-center gap-3">
-
-                        <Badge tone="trust">
-                          Access Granted
-                        </Badge>
-
-                        {patientId && (
-                          <Button
-                            type="button"
-                            onClick={() =>
-                              navigate(
-                                `/doctor/patients/${patientId}`
-                              )
+                      {expiresAt && (
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Expires:{' '}
+                          {new Date(expiresAt).toLocaleString(
+                            'en-IN',
+                            {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
                             }
-                          >
-                            View Patient
-                          </Button>
-                        )}
-
-                      </div>
+                          )}
+                        </p>
+                      )}
 
                     </div>
-                  </Card>
-                )
-              })}
 
+                    {/* Status + action */}
+
+                    <div className="flex items-center gap-3">
+
+                      <Badge tone="trust">
+                        Valid
+                      </Badge>
+
+                      {patientId && (
+                        <Button
+                          type="button"
+                          onClick={() =>
+                            navigate(
+                              `/doctor/patients/${patientId}`
+                            )
+                          }
+                        >
+                          View Patient
+                        </Button>
+                      )}
+
+                    </div>
+
+                  </div>
+                </Card>
+              )
+            })}
+
+          </div>
+        )}
+      </section>
+
+
+      {/* ================================================= */}
+      {/* EXPIRED CONSENTS */}
+      {/* ================================================= */}
+
+      <section>
+        <div className="mb-4">
+          <h2 className="text-lg font-medium text-neutral-900">
+            Expired Consents
+          </h2>
+
+          <p className="mt-1 text-sm text-neutral-500">
+            Patients whose access has expired.
+          </p>
+        </div>
+
+        {expiredPatients.length === 0 ? (
+          <Card>
+            <div className="py-6 text-center">
+              <p className="text-sm text-neutral-500">
+                No expired consents.
+              </p>
             </div>
-          )}
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-4">
+
+            {expiredPatients.map((patient) => {
+
+              const patientId =
+                patient.patientId ??
+                patient.patient_id ??
+                patient.id
+
+              const patientName =
+                patient.patientName ??
+                patient.patient_name ??
+                patient.name ??
+                'Patient'
+
+              const healthId =
+                patient.healthId ??
+                patient.health_id
+
+              const expiresAt =
+                patient.expiresAt ??
+                patient.expires_at ??
+                null
+
+              return (
+                <Card
+                  key={
+                    patient.consentId ??
+                    patient.consent_id ??
+                    patient.id ??
+                    patientId
+                  }
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+                    {/* Patient information */}
+
+                    <div>
+
+                      <p className="font-medium text-neutral-900">
+                        {patientName}
+                      </p>
+
+                      {healthId && (
+                        <p className="mt-1 text-sm text-neutral-500">
+                          Health ID: {healthId}
+                        </p>
+                      )}
+
+                      {patientId && (
+                        <p className="mt-1 text-xs text-neutral-400">
+                          Patient ID: {patientId}
+                        </p>
+                      )}
+
+                      {patient.purpose && (
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Purpose: {patient.purpose}
+                        </p>
+                      )}
+
+                      {expiresAt && (
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Expired:{' '}
+                          {new Date(expiresAt).toLocaleString(
+                            'en-IN',
+                            {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            }
+                          )}
+                        </p>
+                      )}
+
+                    </div>
+
+                    {/* Expired status */}
+
+                    <div className="flex items-center">
+
+                      <Badge tone="emergency">
+                        Expired
+                      </Badge>
+
+                    </div>
+
+                  </div>
+                </Card>
+              )
+            })}
+
+          </div>
+        )}
+      </section>
+
+    </div>
+  )
+})()}
 
       </div>
     </AppShell>

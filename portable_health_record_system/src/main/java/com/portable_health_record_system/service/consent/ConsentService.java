@@ -5,6 +5,8 @@ import com.portable_health_record_system.common.ConsentStatus;
 import com.portable_health_record_system.common.NotificationType;
 import com.portable_health_record_system.dto.consent.ConsentRequest;
 import com.portable_health_record_system.dto.consent.ConsentResponse;
+import com.portable_health_record_system.dto.consent.DoctorPatientAccessResponse;
+import com.portable_health_record_system.dto.consent.PatientConsentRequest;
 import com.portable_health_record_system.entity.auth.User;
 import com.portable_health_record_system.entity.consent.Consent;
 import com.portable_health_record_system.entity.doctor.Doctor;
@@ -176,7 +178,7 @@ public List<ConsentResponse> getPendingRequestsForCurrentPatient() {
             .toList();
 }
 
-@Transactional(readOnly = true)
+@Transactional
 public ConsentResponse getConsentStatus(UUID patientId) {
 
     User actor = currentUserService.requireUser();
@@ -200,9 +202,22 @@ public ConsentResponse getConsentStatus(UUID patientId) {
                     )
             );
 
+    /*
+     * An APPROVED consent is no longer valid once
+     * its expiry time has been reached.
+     */
+    Instant now = Instant.now();
+
+    if (
+            consent.getStatus() == ConsentStatus.APPROVED
+            && consent.getExpiresAt() != null
+            && !consent.getExpiresAt().isAfter(now)
+    ) {
+        consent.setStatus(ConsentStatus.EXPIRED);
+    }
+
     return consentMapper.toDto(consent);
 }
-
 @Transactional(readOnly = true)
 public List<ConsentResponse> getPendingRequestsForCurrentDoctor() {
 
@@ -225,7 +240,7 @@ public List<ConsentResponse> getPendingRequestsForCurrentDoctor() {
 }
 
 @Transactional(readOnly = true)
-public List<ConsentResponse> getApprovedPatientsForCurrentDoctor() {
+public List<DoctorPatientAccessResponse> getApprovedPatientsForCurrentDoctor() {
 
     User actor = currentUserService.requireUser();
 
@@ -233,14 +248,96 @@ public List<ConsentResponse> getApprovedPatientsForCurrentDoctor() {
             .findByUserId(actor.getId())
             .orElseThrow(() ->
                     new ResourceNotFoundException(
-                            "Doctor profile not found"));
+                             "Doctor profile not found"));
+
+    Instant now = Instant.now();
 
     return consentRepository
-            .findByDoctorIdAndStatus(
-                    doctor.getId(),
-                    ConsentStatus.APPROVED)
+            .findByDoctorIdOrderByRequestedAtDesc(doctor.getId())
             .stream()
-            .map(consentMapper::toDto)
+            .filter(consent -> {
+
+                // Only show approved/expired access records.
+                return consent.getStatus() == ConsentStatus.APPROVED
+                        || consent.getStatus() == ConsentStatus.EXPIRED;
+            })
+            .map(consent -> {
+
+                // Automatically mark expired approvals.
+                if (
+                    consent.getStatus() == ConsentStatus.APPROVED &&
+                    consent.getExpiresAt() != null &&
+                    !consent.getExpiresAt().isAfter(now)
+                ) {
+                    consent.setStatus(ConsentStatus.EXPIRED);
+                    consentRepository.save(consent);
+                }
+
+                Patient patient = consent.getPatient();
+
+                return new DoctorPatientAccessResponse(
+            consent.getId(),
+            patient.getId(),
+            patient.getHealthId(),
+            patient.getUser().getDisplayName(),
+            consent.getPurpose(),
+            consent.getStatus(),
+            consent.getRequestedAt(),
+            consent.getRespondedAt(),
+            consent.getExpiresAt()
+    );
+            })
             .toList();
+}
+
+@Transactional
+public ConsentResponse requestByPatient(PatientConsentRequest request) {
+
+    User actor = currentUserService.requireUser();
+
+    if (actor.getRole().getName() != com.portable_health_record_system.common.UserRole.patient) {
+        throw new AccessDeniedBusinessException(
+                "Only patients can initiate reverse consent"
+        );
+    }
+
+    Patient patient = patientRepository.findByUserId(actor.getId())
+            .orElseThrow(() ->
+                    new ResourceNotFoundException("Patient profile not found"));
+
+    UUID doctorId;
+
+    try {
+        doctorId = UUID.fromString(request.doctorId().trim());
+    } catch (IllegalArgumentException e) {
+        throw new BadRequestException("Invalid doctor ID");
+    }
+
+    Doctor doctor = doctorRepository.findById(doctorId)
+            .orElseThrow(() ->
+                    new ResourceNotFoundException("Doctor not found"));
+
+    Consent consent = new Consent();
+
+    consent.setPatient(patient);
+    consent.setDoctor(doctor);
+    consent.setPurpose(request.purpose());
+    consent.setStatus(ConsentStatus.APPROVED);
+    consent.setRequestedAt(Instant.now());
+    consent.setRespondedAt(Instant.now());
+    consent.setExpiresAt(
+            Instant.now().plus(24, ChronoUnit.HOURS)
+    );
+
+    consentRepository.save(consent);
+
+    auditService.log(
+            actor,
+            patient,
+            AuditAction.CONSENT_APPROVED,
+            "Patient granted access to doctor " + doctor.getId()
+    );
+
+    return consentMapper.toDto(consent);
 }
 }

@@ -108,7 +108,7 @@ export default function DoctorPatientDetails() {
 
         setError(
           err?.message ??
-            'Unable to load patient information.'
+          'Unable to load patient information.'
         )
       } finally {
         setIsLoading(false)
@@ -778,24 +778,29 @@ function DoctorMedicalRecord({
   record,
 }) {
   const resourceType =
+    record.fhir_resource_type ??
     record.fhirResourceType ??
     record.resourceType ??
     record.type ??
     'Medical Record'
 
   const recordId =
+    record.record_id ??
     record.recordId ??
     record.id ??
     null
 
   const version =
+    record.version_number ??
     record.versionNumber ??
     record.currentVersion ??
     record.version ??
     1
 
   const date =
+    record.updated_at ??
     record.updatedAt ??
+    record.created_at ??
     record.createdAt ??
     record.recordedAt ??
     null
@@ -867,6 +872,22 @@ function DoctorMedicalRecord({
   )
 }
 
+function formatDate(value) {
+  if (!value) return '—'
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 
 /* ============================================================
    Record Content
@@ -881,6 +902,8 @@ function RecordContent({
    */
 
   const data =
+    record.resource_data ??
+    record.resourceData ??
     record.fhirResource ??
     record.resource ??
     record.data ??
@@ -950,23 +973,167 @@ function RecordContent({
       </div>
 
 
-      {/* Full structured resource */}
+     {/* Structured record */}
 
-      <details className="mt-4">
+<details className="mt-4">
+  <summary className="cursor-pointer text-sm font-medium text-neutral-700">
+    View record details
+  </summary>
 
-        <summary className="cursor-pointer text-sm font-medium text-neutral-700">
-          View structured record
-        </summary>
+  <div className="mt-3 rounded-lg bg-neutral-50 p-4">
+    <div className="space-y-4">
 
-        <pre className="mt-3 overflow-x-auto rounded-lg bg-neutral-50 p-4 text-xs leading-5 text-neutral-600">
-          {JSON.stringify(
-            data,
-            null,
-            2
+      {/* Observation */}
+      {resourceType === 'Observation' && (
+        <>
+          {data?.code?.text && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                Observation
+              </p>
+              <p className="mt-1 text-sm font-medium text-neutral-800">
+                {data.code.text}
+              </p>
+            </div>
           )}
-        </pre>
 
-      </details>
+          {data?.valueQuantity && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {data.valueQuantity.value !== undefined && (
+                <div>
+                  <p className="text-xs font-medium text-neutral-500">
+                    Value
+                  </p>
+                  <p className="mt-1 text-sm text-neutral-800">
+                    {data.valueQuantity.value}
+                  </p>
+                </div>
+              )}
+
+              {data.valueQuantity.unit && (
+                <div>
+                  <p className="text-xs font-medium text-neutral-500">
+                    Unit
+                  </p>
+                  <p className="mt-1 text-sm text-neutral-800">
+                    {data.valueQuantity.unit}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {data?.effectiveDateTime && (
+            <div>
+              <p className="text-xs font-medium text-neutral-500">
+                Date
+              </p>
+              <p className="mt-1 text-sm text-neutral-800">
+                {formatDate(data.effectiveDateTime)}
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Condition */}
+      {resourceType === 'Condition' && (
+        <>
+          {data?.code?.text && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                Diagnosis
+              </p>
+              <p className="mt-1 text-sm font-medium text-neutral-800">
+                {data.code.text}
+              </p>
+            </div>
+          )}
+
+          {data?.clinicalStatus?.coding?.[0]?.code && (
+            <div>
+              <p className="text-xs font-medium text-neutral-500">
+                Status
+              </p>
+              <p className="mt-1 text-sm capitalize text-neutral-800">
+                {data.clinicalStatus.coding[0].code}
+              </p>
+            </div>
+          )}
+
+          {data?.onsetDateTime && (
+            <div>
+              <p className="text-xs font-medium text-neutral-500">
+                Date
+              </p>
+              <p className="mt-1 text-sm text-neutral-800">
+                {formatDate(data.onsetDateTime)}
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Medication Request */}
+      {resourceType === 'MedicationRequest' && (
+        <>
+          {data?.medicationCodeableConcept?.text && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                Medicine
+              </p>
+              <p className="mt-1 text-sm font-medium text-neutral-800">
+                {data.medicationCodeableConcept.text}
+              </p>
+            </div>
+          )}
+
+          {data?.dosageInstruction?.[0]?.text && (
+            <div>
+              <p className="text-xs font-medium text-neutral-500">
+                Dosage
+              </p>
+              <p className="mt-1 text-sm text-neutral-800">
+                {data.dosageInstruction[0].text}
+              </p>
+            </div>
+          )}
+
+          {data?.status && (
+            <div>
+              <p className="text-xs font-medium text-neutral-500">
+                Status
+              </p>
+              <p className="mt-1 text-sm capitalize text-neutral-800">
+                {data.status}
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Notes */}
+      {data?.notes && (
+        <div>
+          <p className="text-xs font-medium text-neutral-500">
+            Notes
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-neutral-800">
+            {data.notes}
+          </p>
+        </div>
+      )}
+
+      {/* Fallback */}
+      {!data && (
+        <p className="text-sm text-neutral-500">
+          No additional record details available.
+        </p>
+      )}
+
+    </div>
+  </div>
+</details>
 
     </div>
   )

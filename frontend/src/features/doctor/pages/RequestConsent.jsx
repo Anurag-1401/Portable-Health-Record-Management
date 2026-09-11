@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState,useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { AppShell } from '../../../components/layout/AppShell'
 import { QRScanner } from '../../../components/qr/QRScanner'
@@ -7,6 +8,10 @@ import { Button } from '../../../components/ui/Button'
 import { Badge } from '../../../components/ui/Badge'
 
 import { apiClient } from '../../../lib/apiClient'
+import {
+  isNativePlatform,
+  shouldUseWebQrScanner,
+} from '../../../lib/platform'
 
 
 export default function ScanPatientQR() {
@@ -19,6 +24,9 @@ export default function ScanPatientQR() {
    *   payloadHash: "..."
    * }
    */
+  const navigate = useNavigate();
+  const scannerContainerRef = useRef(null)
+
   const [scannedPayload, setScannedPayload] = useState(null)
 
   /*
@@ -31,68 +39,127 @@ export default function ScanPatientQR() {
 
   const [error, setError] = useState(null)
 
+  const useCamera =
+    isNativePlatform() || shouldUseWebQrScanner()
+
+  useEffect(() => {
+  return () => {
+    // Stop any camera streams belonging to the scanner
+    const container = scannerContainerRef.current
+
+    if (!container) return
+
+    const videos = container.querySelectorAll('video')
+
+    videos.forEach((video) => {
+      const stream = video.srcObject
+
+      if (stream instanceof MediaStream) {
+        stream.getTracks().forEach((track) => {
+          track.stop()
+        })
+      }
+
+      video.srcObject = null
+    })
+  }
+}, [])
+
 
   /*
    * ---------------------------------------------
    * Handle QR scan
    * ---------------------------------------------
    */
-  function handleScan(decodedText) {
+ async function handleScan(decodedText) {
+  setError(null)
+  setRequestStatus('sending')
 
-    setError(null)
-
-    if (!decodedText || !decodedText.trim()) {
-      setError('The QR code does not contain any data.')
-      return
-    }
-
-    try {
-
-      /*
-       * Expected QR payload:
-       *
-       * {
-       *   "healthId": "PHR-123456",
-       *   "payloadHash": "..."
-       * }
-       */
-      const payload = JSON.parse(decodedText)
-
-      if (!payload.healthId) {
-        throw new Error(
-          'This QR code does not contain a valid Health ID.'
-        )
-      }
-
-      setScannedPayload({
-        healthId: payload.healthId,
-        payloadHash: payload.payloadHash ?? null,
-      })
-
-      setRequestStatus('idle')
-
-    } catch (err) {
-
-      /*
-       * If your QR generator sometimes contains
-       * only the Health ID as plain text, support
-       * that format as a fallback.
-       */
-      const rawHealthId = decodedText.trim()
-
-      if (!rawHealthId) {
-        setError('Invalid QR code.')
-        return
-      }
-
-      setScannedPayload({
-        healthId: rawHealthId,
-        payloadHash: null,
-      })
-
-      setRequestStatus('idle')
-    }
+  if (!decodedText || !decodedText.trim()) {
+    setError('The QR code does not contain any data.')
+    setRequestStatus('error')
+    return
   }
+
+  const scannedText = decodedText.trim()
+
+  try {
+    /*
+     * NEW UNIVERSAL QR
+     *
+     * Example:
+     * http://localhost:5173/qr/patient/abc123
+     */
+    if (
+  scannedText.startsWith('http://') ||
+  scannedText.startsWith('https://')
+) {
+  const url = new URL(scannedText)
+
+  const isPatientQr =
+    url.pathname.startsWith('/qr/patient/')
+
+  if (!isPatientQr) {
+    throw new Error(
+      'This is not a valid PHR patient QR code.'
+    )
+  }
+
+  navigate(
+    `${url.pathname}${url.search}${url.hash}`,{replace:true}
+  )
+
+  return
+}
+
+    /*
+     * OLD JSON QR
+     *
+     * Kept temporarily for backward compatibility
+     * with old printed QR codes.
+     */
+    const payload = JSON.parse(scannedText)
+
+    if (!payload.healthId) {
+      throw new Error(
+        'This is not a valid Patient Health ID QR code.'
+      )
+    }
+
+    if (!payload.payloadHash) {
+      throw new Error(
+        'This QR code does not contain a QR integrity hash.'
+      )
+    }
+
+    const result = await apiClient.validateQr(
+      payload.healthId,
+      payload.payloadHash
+    )
+
+    if (!result.valid) {
+      throw new Error(
+        'Invalid or tampered patient QR code.'
+      )
+    }
+
+    setScannedPayload({
+      patientId: result.patientId,
+      healthId: result.healthId,
+      payloadHash: payload.payloadHash,
+    })
+
+    setRequestStatus('idle')
+  } catch (err) {
+    console.error('Patient QR validation failed:', err)
+
+    setScannedPayload(null)
+    setError(
+      err?.message || 'Invalid patient QR code.'
+    )
+    setRequestStatus('error')
+  }
+}
 
 
   /*
@@ -126,7 +193,9 @@ export default function ScanPatientQR() {
         'Clinical consultation'
       )
 
-      setRequestStatus('pending')
+      navigate('/doctor/dashboard', {
+  replace: true,
+})
 
     } catch (err) {
 
@@ -195,7 +264,7 @@ export default function ScanPatientQR() {
 
           {!scannedPayload && (
 
-            <div>
+            <div ref={scannerContainerRef}>
 
               <QRScanner
                 onScan={handleScan}
@@ -223,6 +292,35 @@ export default function ScanPatientQR() {
             </div>
 
           )}
+
+          {!scannedPayload && !useCamera && (
+  <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-6 text-center">
+    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white border border-neutral-200">
+      <span className="text-xl">⌨️</span>
+    </div>
+
+    <h3 className="mt-4 text-sm font-semibold text-neutral-800">
+      Camera scanning is unavailable on this device
+    </h3>
+
+    <p className="mt-2 text-sm leading-6 text-neutral-500">
+      QR scanning is available on the mobile app or a
+      mobile browser. On a computer, search for the patient
+      using their Health ID instead.
+    </p>
+
+    <div className="mt-4">
+      <Button
+        type="button"
+        onClick={() =>
+          navigate('/doctor/patients/search')
+        }
+      >
+        Search Patient by Health ID
+      </Button>
+    </div>
+  </div>
+)}
 
 
           {/* ======================================= */}
@@ -254,7 +352,7 @@ export default function ScanPatientQR() {
                   </div>
 
                   <Badge tone="trust">
-                    QR scanned
+                    QR Verified
                   </Badge>
 
                 </div>
