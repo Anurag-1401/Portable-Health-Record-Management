@@ -4,6 +4,16 @@ import { Card } from '../../../components/ui/Card'
 import { Button } from '../../../components/ui/Button'
 import { apiClient } from '../../../lib/apiClient'
 import { useAuth } from '../../../hooks/useAuth'
+import {
+  putRecord,
+  getRecordsByPatient,
+} from '../../../lib/offlineDb'
+
+import { queueWrite } from '../../../lib/syncQueue'
+import { getDeviceId } from '../../../lib/deviceId'
+// import { createLocalRecordId } from '../../../lib/offlineRecord'
+import { useNetworkStatus } from '../../../hooks/useNetworkStatus'
+import { Badge } from '../../../components/ui/Badge'
 
 const FHIR_TYPES = [
   'Condition',
@@ -46,6 +56,16 @@ function normalizeRecord(record) {
       record.current_record_hash ??
       record.currentRecordHash,
 
+    syncStatus:
+  record.sync_status ??
+  record.syncStatus ??
+  'SYNCED',
+
+localOnly:
+  record.local_only ??
+  record.localOnly ??
+  false,
+
     createdAt:
       record.created_at ??
       record.createdAt,
@@ -65,18 +85,9 @@ function formatDate(value) {
   })
 }
 
-function formatResourceData(data) {
-  if (!data) return '{}'
-
-  if (typeof data === 'string') {
-    return data
-  }
-
-  return JSON.stringify(data, null, 2)
-}
-
 export default function PatientRecords() {
   const { session } = useAuth()
+  const isOnline = useNetworkStatus()
 
   const [records, setRecords] = useState([])
   const [documents, setDocuments] = useState({})
@@ -109,47 +120,159 @@ export default function PatientRecords() {
 const [selectedFile, setSelectedFile] = useState(null)
 
   const patientId =
-    session?.patientId ??
+    session?.userId ??
     session?.healthId
 
-  async function loadRecords() {
-    try {
-      setLoading(true)
-      setError('')
+async function loadRecords() {
+  try {
+    const healthId = session?.healthId
 
-      const result = await apiClient.getMyRecords()
+    if (!healthId) {
+      throw new Error(
+        'Patient information is unavailable.'
+      )
+    }
 
-      const normalized = Array.isArray(result)
-        ? result.map(normalizeRecord)
-        : []
+    /*
+     * =====================================================
+     * OFFLINE
+     * =====================================================
+     *
+     * Never call the backend while offline.
+     * IndexedDB is the source of truth for locally
+     * created records.
+     */
+    if (!isOnline) {
+      const localRecords =
+        await getRecordsByPatient(healthId)
 
-      setRecords(normalized)
+      const normalizedRecords =
+        localRecords
+          .map(normalizeRecord)
+          .sort(
+            (a, b) =>
+              new Date(b.updatedAt || b.createdAt || 0) -
+              new Date(a.updatedAt || a.createdAt || 0)
+          )
 
-      // Load attachments for every record
-      const documentMap = {}
+      setRecords(normalizedRecords)
 
-      await Promise.all(
-        normalized.map(async (record) => {
-          try {
-            const docs = await apiClient.getRecordDocuments(record.id)
-            documentMap[record.id] = Array.isArray(docs) ? docs : []
-          } catch {
-            documentMap[record.id] = []
-          }
-        })
+      return
+    }
+
+    /*
+     * =====================================================
+     * ONLINE
+     * =====================================================
+     */
+
+    const serverRecords =
+      await apiClient.getMyRecords()
+
+    const normalizedServerRecords =
+      serverRecords.map(normalizeRecord)
+
+    /*
+     * Keep local records that are still waiting
+     * for synchronization.
+     *
+     * Otherwise a refresh while online would cause
+     * them to disappear before sync completes.
+     */
+    const localRecords =
+      await getRecordsByPatient(healthId)
+
+    const pendingLocalRecords =
+      localRecords
+        .filter(
+          (record) =>
+            record.local_only === true ||
+            record.localOnly === true ||
+            record.sync_status === 'PENDING_SYNC' ||
+            record.syncStatus === 'PENDING_SYNC'
+        )
+        .map(normalizeRecord)
+
+    /*
+     * Avoid duplicates if a server record and local
+     * record happen to have the same ID.
+     */
+    const serverIds =
+      new Set(
+        normalizedServerRecords.map(
+          (record) => record.id
+        )
       )
 
-      setDocuments(documentMap)
-    } catch (err) {
-      setError(err.message || 'Failed to load medical records.')
-    } finally {
-      setLoading(false)
+    const uniquePendingLocalRecords =
+      pendingLocalRecords.filter(
+        (record) =>
+          !serverIds.has(record.id)
+      )
+
+    setRecords([
+      ...uniquePendingLocalRecords,
+      ...normalizedServerRecords,
+    ])
+
+  } catch (err) {
+    console.error(
+      'Failed to load medical records:',
+      err
+    )
+
+    /*
+     * If the server request fails for ANY reason,
+     * fall back to IndexedDB.
+     *
+     * This is important for offline-first behavior.
+     */
+    try {
+      const healthId = session?.healthId
+
+      if (healthId) {
+        const localRecords =
+          await getRecordsByPatient(healthId)
+
+        setRecords(
+          localRecords
+            .map(normalizeRecord)
+            .sort(
+              (a, b) =>
+                new Date(
+                  b.updatedAt ||
+                  b.createdAt ||
+                  0
+                ) -
+                new Date(
+                  a.updatedAt ||
+                  a.createdAt ||
+                  0
+                )
+            )
+        )
+      }
+    } catch (localError) {
+      console.error(
+        'Failed to load local medical records:',
+        localError
+      )
     }
+
+    /*
+     * Don't overwrite the screen with a generic
+     * server error if we successfully loaded local data.
+     */
+  } finally{
+    setLoading(false)
   }
+}
 
   useEffect(() => {
+  if (session?.healthId) {
     loadRecords()
-  }, [])
+  }
+}, [session?.healthId, isOnline])
 
  function openCreateForm() {
   setEditingRecord(null)
@@ -271,7 +394,6 @@ const [selectedFile, setSelectedFile] = useState(null)
     if (form.fhirResourceType === 'Observation') {
       resourceData = {
         resourceType: 'Observation',
-
         status: 'final',
 
         code: {
@@ -327,13 +449,9 @@ const [selectedFile, setSelectedFile] = useState(null)
       }
     }
 
-    if (
-      form.fhirResourceType ===
-      'MedicationRequest'
-    ) {
+    if (form.fhirResourceType === 'MedicationRequest') {
       resourceData = {
         resourceType: 'MedicationRequest',
-
         status: 'active',
 
         medicationCodeableConcept: {
@@ -366,6 +484,144 @@ const [selectedFile, setSelectedFile] = useState(null)
       }
     }
 
+    const patientId =
+      session?.healthId
+
+    if (!patientId) { 
+      throw new Error(
+        'Patient information is unavailable.'
+      )
+    }
+
+    /*
+     * =========================================================
+     * OFFLINE CREATE
+     * =========================================================
+     *
+     * Offline creation is supported only for NEW records.
+     *
+     * Updates and attachments still require the server
+     * until the synchronization system is completed.
+     */
+if (!isOnline && !editingRecord) {
+  const localRecordId =
+    `local-${crypto.randomUUID()}`
+
+  const now =
+    new Date().toISOString()
+
+  const localRecord = {
+    record_id: localRecordId,
+
+    // Local IndexedDB partition key.
+    // This is the patient's Health ID, not patients.id UUID.
+    health_id: patientId,
+
+    fhir_resource_type:
+      form.fhirResourceType,
+
+    version_number: 1,
+
+    resource_data:
+      resourceData,
+
+    previous_record_hash: null,
+
+    current_record_hash: null,
+
+    created_at: now,
+
+    updated_at: now,
+
+    sync_status: 'PENDING_SYNC',
+
+    local_only: true,
+  }
+
+  /*
+   * Save record locally.
+   */
+  await putRecord(localRecord)
+
+  /*
+   * Queue CREATE operation.
+   *
+   * targetRecordId MUST be null because the
+   * server record does not exist yet.
+   */
+  await queueWrite({
+    deviceId: getDeviceId(),
+
+    targetRecordId: null,
+
+    operation: 'CREATE',
+
+    payload: {
+      local_record_id:
+        localRecordId,
+
+      health_id:
+        patientId,
+
+      fhir_resource_type:
+        form.fhirResourceType,
+
+      resource_data:
+        resourceData,
+
+      expected_version: null,
+    },
+  })
+
+  /*
+   * Immediately show the local record.
+   */
+  const normalized =
+    normalizeRecord(localRecord)
+
+  setRecords((current) => [
+    normalized,
+    ...current,
+  ])
+
+  setSuccess(
+    'Medical record saved offline. It will sync when you are back online.'
+  )
+
+  /*
+   * Attachments cannot be uploaded until
+   * synchronization creates the server record.
+   */
+  if (selectedFile) {
+    setError(
+      'The record was saved offline, but the attachment will be available after synchronization.'
+    )
+  }
+
+  setShowForm(false)
+  setEditingRecord(null)
+  setSelectedFile(null)
+
+  return
+}
+
+    /*
+     * =========================================================
+     * OFFLINE UPDATE
+     * =========================================================
+     */
+    if (!isOnline && editingRecord) {
+      throw new Error(
+        'Editing an existing medical record requires an internet connection.'
+      )
+    }
+
+    /*
+     * =========================================================
+     * ONLINE CREATE / UPDATE
+     * =========================================================
+     */
+
     let savedRecord
 
     if (editingRecord) {
@@ -394,8 +650,7 @@ const [selectedFile, setSelectedFile] = useState(null)
     } else {
       savedRecord =
         await apiClient.createRecord({
-          patientId:
-            session?.patientId ?? null,
+          patientId:session?.patientId ?? null,
 
           healthId:
             session?.healthId ?? null,
@@ -412,8 +667,8 @@ const [selectedFile, setSelectedFile] = useState(null)
     }
 
     /*
-     * Upload attachment AFTER the record has
-     * been successfully created.
+     * Upload attachment only after the server
+     * has successfully created the record.
      */
     if (selectedFile) {
       const saved =
@@ -432,9 +687,14 @@ const [selectedFile, setSelectedFile] = useState(null)
     await loadRecords()
 
   } catch (err) {
+    console.error(
+      'Failed to save medical record:',
+      err
+    )
+
     setError(
-      err.message ||
-        'Failed to save medical record.'
+      err?.message ||
+      'Failed to save medical record.'
     )
   } finally {
     setSaving(false)
@@ -1082,6 +1342,18 @@ const [selectedFile, setSelectedFile] = useState(null)
                         <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs text-neutral-600">
                           Version {record.versionNumber}
                         </span>
+
+                        {record.syncStatus === 'PENDING_SYNC' && (
+  <Badge tone="neutral">
+    Pending Sync
+  </Badge>
+)}
+
+{record.syncStatus !== 'PENDING_SYNC' && (
+  <Badge tone="trust">
+    Synced
+  </Badge>
+)}
                       </div>
 
                       <p className="mt-2 text-sm text-neutral-500">

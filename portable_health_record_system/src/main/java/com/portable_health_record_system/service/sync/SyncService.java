@@ -104,13 +104,15 @@ public class SyncService {
         return new SyncRecordResponse(null, "applied");
     }
 
-    private SyncOperation parseOperation(String value) {
-        try {
-            return SyncOperation.valueOf(value);
-        } catch (Exception ex) {
-            throw new BadRequestException("operation must be insert or update");
-        }
+   private SyncOperation parseOperation(String value) {
+    try {
+        return SyncOperation.valueOf(value.toUpperCase());
+    } catch (Exception ex) {
+        throw new BadRequestException(
+                "operation must be CREATE or UPDATE"
+        );
     }
+}
 
     private Patient resolvePatient(Map<String, Object> payload, User actor) {
         Object patientId = payload.get("patient_id");

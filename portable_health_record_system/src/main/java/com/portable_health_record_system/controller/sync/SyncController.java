@@ -14,7 +14,7 @@ public class SyncController {
 
     public SyncController(SyncService syncService) {
         this.syncService = syncService;
-    }
+    } 
 
     @PreAuthorize("hasAnyRole('PATIENT', 'DOCTOR', 'ADMIN')")
     @PostMapping("/record")

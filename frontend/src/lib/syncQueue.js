@@ -1,8 +1,9 @@
-import { STORES, openDb } from './offlineDb'
+import {
+  STORES,
+  openDb,
+  putRecord,
+} from './offlineDb'
 
-/**
- * Fields that must never be automatically conflict-resolved.
- */
 export const CRITICAL_FIELDS = new Set([
   'allergies',
   'chronic_conditions',
@@ -13,9 +14,6 @@ function isCriticalField(fieldName) {
   return CRITICAL_FIELDS.has(fieldName)
 }
 
-/**
- * Add an offline write to the local sync queue.
- */
 export async function queueWrite({
   deviceId,
   targetRecordId,
@@ -34,54 +32,83 @@ export async function queueWrite({
   }
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.syncQueue, 'readwrite')
-    const store = tx.objectStore(STORES.syncQueue)
+    const tx = db.transaction(
+      STORES.syncQueue,
+      'readwrite'
+    )
 
-    const req = store.add(entry)
+    const store =
+      tx.objectStore(STORES.syncQueue)
 
-    req.onsuccess = () => {
-      db.close()
+    const request =
+      store.add(entry)
 
-      resolve({
-        ...entry,
-        queue_id: req.result,
-      })
+    request.onsuccess = () => {
+      entry.queue_id = request.result
     }
 
-    req.onerror = () => {
+    tx.oncomplete = () => {
       db.close()
-      reject(req.error)
+      resolve(entry)
     }
 
     tx.onerror = () => {
       db.close()
       reject(tx.error)
     }
+
+    tx.onabort = () => {
+      db.close()
+      reject(
+        tx.error ||
+        new Error('Failed to queue sync operation')
+      )
+    }
   })
 }
 
-/**
- * Process all pending offline writes.
+
+/*
+ * =========================================================
+ * PROCESS SYNC QUEUE
+ * =========================================================
  */
 export async function processSyncQueue(apiClient) {
+  console.log(
+  '🔄 processSyncQueue() CALLED'
+)
   const db = await openDb()
 
   try {
-    const pending = await getPendingEntries(db)
-    const results = []
+    const pending =
+      await getPendingEntries(db)
 
-    // This DB connection is only used for reading the pending entries.
     db.close()
+
+    const results = []
 
     for (const entry of pending) {
       try {
-        const response = await apiClient.syncRecordWrite(entry)
+        console.log(
+          'Syncing queue entry:',
+          entry.queue_id
+        )
 
+        const response =
+          await apiClient.syncRecordWrite(entry)
+
+        /*
+         * ================================================
+         * CRITICAL CONFLICT
+         * ================================================
+         */
         if (response?.conflict) {
-          const fieldName = response.conflict.field_name
+          const fieldName =
+            response.conflict.field_name
 
           if (isCriticalField(fieldName)) {
-            const statusDb = await openDb()
+            const statusDb =
+              await openDb()
 
             await updateEntryStatus(
               statusDb,
@@ -101,7 +128,14 @@ export async function processSyncQueue(apiClient) {
           }
         }
 
-        const statusDb = await openDb()
+        /*
+         * ================================================
+         * SUCCESS
+         * ================================================
+         */
+
+        const statusDb =
+          await openDb()
 
         await updateEntryStatus(
           statusDb,
@@ -111,131 +145,214 @@ export async function processSyncQueue(apiClient) {
 
         statusDb.close()
 
+        /*
+         * Mark the corresponding local record
+         * as SYNCED.
+         */
+        const localRecordId =
+          entry.payload?.local_record_id
+
+        if (localRecordId) {
+          await markLocalRecordSynced(
+            localRecordId
+          )
+        }
+
         results.push({
           queue_id: entry.queue_id,
           resolved: true,
         })
+
       } catch (err) {
+        /*
+         * ================================================
+         * SYNC FAILED
+         * ================================================
+         *
+         * IMPORTANT:
+         *
+         * Do NOT mark the queue entry as synced.
+         *
+         * It remains:
+         *
+         *     local_only
+         *
+         * and will be retried the next time
+         * processSyncQueue() runs.
+         */
+        console.error(
+          `Sync failed for queue ${entry.queue_id}:`,
+          err
+        )
+
         results.push({
           queue_id: entry.queue_id,
           resolved: false,
-          reason: 'network_error',
+          reason: 'network_or_server_error',
           err,
         })
       }
     }
 
     return results
+
   } catch (error) {
-    // Make sure DB connection doesn't remain open.
     try {
       db.close()
-    } catch {
-      // Ignore close errors.
-    }
+    } catch {}
 
     throw error
   }
 }
 
-// ---------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------
 
+/*
+ * =========================================================
+ * GET PENDING QUEUE ENTRIES
+ * =========================================================
+ */
 function getPendingEntries(db) {
   return new Promise((resolve, reject) => {
-    try {
-      if (!db.objectStoreNames.contains(STORES.syncQueue)) {
-        reject(
-          new Error(
-            `IndexedDB object store "${STORES.syncQueue}" does not exist`
-          )
-        )
-        return
-      }
-
-      const tx = db.transaction(
+    const tx =
+      db.transaction(
         STORES.syncQueue,
         'readonly'
       )
 
-      const store = tx.objectStore(STORES.syncQueue)
+    const store =
+      tx.objectStore(STORES.syncQueue)
 
-      if (!store.indexNames.contains('status')) {
+    const index =
+      store.index('status')
+
+    const request =
+      index.getAll('local_only')
+
+    request.onsuccess = () => {
+      resolve(request.result || [])
+    }
+
+    request.onerror = () => {
+      reject(request.error)
+    }
+  })
+}
+
+
+/*
+ * =========================================================
+ * UPDATE QUEUE STATUS
+ * =========================================================
+ */
+function updateEntryStatus(
+  db,
+  queueId,
+  status
+) {
+  return new Promise((resolve, reject) => {
+    const tx =
+      db.transaction(
+        STORES.syncQueue,
+        'readwrite'
+      )
+
+    const store =
+      tx.objectStore(STORES.syncQueue)
+
+    const request =
+      store.get(queueId)
+
+    request.onsuccess = () => {
+      const entry = request.result
+
+      if (!entry) {
         reject(
           new Error(
-            `IndexedDB index "status" does not exist on "${STORES.syncQueue}"`
+            `Queue entry ${queueId} not found`
           )
         )
         return
       }
 
-      const index = store.index('status')
-      const req = index.getAll('local_only')
+      entry.status = status
 
-      req.onsuccess = () => {
-        resolve(req.result ?? [])
+      if (status === 'synced') {
+        entry.synced_at =
+          new Date().toISOString()
       }
 
-      req.onerror = () => {
-        reject(req.error)
-      }
+      store.put(entry)
+    }
 
-      tx.onerror = () => {
-        reject(tx.error)
-      }
-    } catch (error) {
-      reject(error)
+    request.onerror = () => {
+      reject(request.error)
+    }
+
+    tx.oncomplete = () => {
+      resolve()
+    }
+
+    tx.onerror = () => {
+      reject(tx.error)
     }
   })
 }
 
-function updateEntryStatus(db, queueId, status) {
+
+/*
+ * =========================================================
+ * MARK LOCAL RECORD AS SYNCED
+ * =========================================================
+ */
+async function markLocalRecordSynced(
+  localRecordId
+) {
+  const db = await openDb()
+
   return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(
-        STORES.syncQueue,
+    const tx =
+      db.transaction(
+        STORES.records,
         'readwrite'
       )
 
-      const store = tx.objectStore(STORES.syncQueue)
+    const store =
+      tx.objectStore(STORES.records)
 
-      const getReq = store.get(queueId)
+    const request =
+      store.get(localRecordId)
 
-      getReq.onsuccess = () => {
-        const entry = getReq.result
+    request.onsuccess = () => {
+      const record = request.result
 
-        if (!entry) {
-          resolve(null)
-          return
-        }
-
-        entry.status = status
-
-        if (status === 'synced') {
-          entry.synced_at = new Date().toISOString()
-        }
-
-        const putReq = store.put(entry)
-
-        putReq.onsuccess = () => {
-          resolve(entry)
-        }
-
-        putReq.onerror = () => {
-          reject(putReq.error)
-        }
+      if (!record) {
+        return
       }
 
-      getReq.onerror = () => {
-        reject(getReq.error)
-      }
+      record.sync_status = 'SYNCED'
 
-      tx.onerror = () => {
-        reject(tx.error)
-      }
-    } catch (error) {
-      reject(error)
+      /*
+       * Keep the local record for now.
+       * We will reconcile it with the real server
+       * record in Step 11.
+       */
+      record.local_only = false
+
+      store.put(record)
+    }
+
+    request.onerror = () => {
+      reject(request.error)
+    }
+
+    tx.oncomplete = () => {
+      db.close()
+      resolve()
+    }
+
+    tx.onerror = () => {
+      db.close()
+      reject(tx.error)
     }
   })
 }

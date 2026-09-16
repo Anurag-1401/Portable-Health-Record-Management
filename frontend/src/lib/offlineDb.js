@@ -3,7 +3,7 @@
  */
 
 const DB_NAME = 'health_record_offline'
-const DB_VERSION = 2
+const DB_VERSION = 4
 
 const STORES = {
   records: 'records',
@@ -16,41 +16,98 @@ function openDb() {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
 
     req.onupgradeneeded = (event) => {
-      const db = event.target.result
+  const db = event.target.result
+  const transaction = event.target.transaction
 
-      if (!db.objectStoreNames.contains(STORES.records)) {
-        db.createObjectStore(STORES.records, {
-          keyPath: 'record_id',
-        })
-      }
+  console.log(
+    'IndexedDB upgrade:',
+    event.oldVersion,
+    '→',
+    event.newVersion
+  )
 
-      if (!db.objectStoreNames.contains(STORES.syncQueue)) {
-        const store = db.createObjectStore(STORES.syncQueue, {
+  /*
+   * ============================================
+   * RECORDS
+   * ============================================
+   */
+  if (!db.objectStoreNames.contains(STORES.records)) {
+    console.log('Creating records store')
+
+    db.createObjectStore(STORES.records, {
+      keyPath: 'record_id',
+    })
+  }
+
+  /*
+   * ============================================
+   * SYNC QUEUE
+   * ============================================
+   */
+  if (!db.objectStoreNames.contains(STORES.syncQueue)) {
+    console.log('Creating sync_queue store')
+
+    const store =
+      db.createObjectStore(
+        STORES.syncQueue,
+        {
           keyPath: 'queue_id',
           autoIncrement: true,
-        })
-
-        store.createIndex('status', 'status', {
-          unique: false,
-        })
-      } else {
-        // Make sure the status index exists even for an older DB.
-        const store = event.target.transaction.objectStore(STORES.syncQueue)
-
-        if (!store.indexNames.contains('status')) {
-          store.createIndex('status', 'status', {
-            unique: false,
-          })
         }
-      }
+      )
 
-      if (!db.objectStoreNames.contains(STORES.patientCache)) {
-        db.createObjectStore(STORES.patientCache, {
-          keyPath: 'patient_id',
-        })
+    store.createIndex(
+      'status',
+      'status',
+      {
+        unique: false,
       }
+    )
+  } else {
+    const store =
+      transaction.objectStore(
+        STORES.syncQueue
+      )
+
+    if (
+      !store.indexNames.contains('status')
+    ) {
+      console.log(
+        'Creating sync_queue.status index'
+      )
+
+      store.createIndex(
+        'status',
+        'status',
+        {
+          unique: false,
+        }
+      )
     }
+  }
 
+  /*
+   * ============================================
+   * PATIENT CACHE
+   * ============================================
+   */
+  if (
+    !db.objectStoreNames.contains(
+      STORES.patientCache
+    )
+  ) {
+    console.log(
+      'Creating patient_cache store'
+    )
+
+    db.createObjectStore(
+      STORES.patientCache,
+      {
+        keyPath: 'patient_id',
+      }
+    )
+  }
+}
     req.onsuccess = () => {
       const db = req.result
 
@@ -126,8 +183,8 @@ export async function getRecordsByPatient(patientId) {
         return
       }
 
-      if (cursor.value.patient_id === patientId) {
-        results.push(cursor.value)
+      if (cursor.value.health_id === patientId) {
+        results.push(cursor.value) 
       }
 
       cursor.continue()
