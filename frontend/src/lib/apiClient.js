@@ -20,7 +20,7 @@ import { Preferences } from '@capacitor/preferences'
 
 const BASE_URL =
   import.meta.env.VITE_API_BASE_URL ??
-  'http://localhost:8000/api'
+  'https://portable-health-record-management.onrender.com/api'
 
 /* ============================================================
    TOKEN / SESSION STORAGE
